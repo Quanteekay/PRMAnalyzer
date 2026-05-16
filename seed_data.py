@@ -19,7 +19,7 @@ class SeedRow:
     market: str
     year: int
     quarter: int
-    avg_price_per_m2: float
+    avg_price_per_m2: float | None
     transactions: int
     powiat: str = ""        # "powiat m. Warszawa" / "powiat krakowski" etc.
     teryt_code: str = ""    # BDL unit-id (12 chars) lub TERYT

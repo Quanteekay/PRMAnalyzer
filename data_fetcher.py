@@ -2,7 +2,8 @@
 Live fetchers for:
 - dane.gov.pl  (CKAN-style API)
 - RCN (Rejestr Cen Nieruchomości) - distributed via dane.gov.pl as open data
-- GUS BDL  (Bank Danych Lokalnych - aux housing statistics)
+- GUS BDL  (Bank Danych Lokalnych) - per-powiat housing indicators
+- RCN dump per powiat - aggregated transaction data with avg price/m²
 
 If a remote source is unreachable the fetcher falls back to the curated seed
 data so the dashboard always has something to display. Every refresh is logged
@@ -21,6 +22,8 @@ from flask import current_app
 from extensions import db
 from models import DataRefreshLog, RealEstateRecord, BackgroundJob
 from seed_data import all_seed_rows, SeedRow
+from bdl_powiats import fetch_all_housing_per_powiat
+from rcn_dump import fetch_rcn_per_powiat
 
 log = logging.getLogger(__name__)
 
@@ -82,9 +85,12 @@ def _upsert_rows(rows: Iterable[SeedRow], source: str) -> tuple[int, int]:
     updated = 0
     now = datetime.utcnow()
     for row in rows:
+        # Powiat is part of the natural key so the same city name in different
+        # powiats (rare but possible) doesn't collide.
         existing = (
             RealEstateRecord.query.filter_by(
                 voivodeship=row.voivodeship,
+                powiat=row.powiat or None,
                 city=row.city,
                 property_type=row.property_type,
                 market=row.market,
@@ -96,12 +102,15 @@ def _upsert_rows(rows: Iterable[SeedRow], source: str) -> tuple[int, int]:
         if existing:
             existing.avg_price_per_m2 = row.avg_price_per_m2
             existing.transactions = row.transactions
+            existing.teryt_code = row.teryt_code or existing.teryt_code
             existing.fetched_at = now
             updated += 1
         else:
             db.session.add(
                 RealEstateRecord(
                     voivodeship=row.voivodeship,
+                    powiat=row.powiat or None,
+                    teryt_code=row.teryt_code or None,
                     city=row.city,
                     property_type=row.property_type,
                     market=row.market,
@@ -143,11 +152,56 @@ def _run_one_source(source_label: str, fetch_fn, triggered_by: str) -> DataRefre
 # Public API
 # ---------------------------------------------------------------------------
 
+def fetch_bdl_powiats() -> list[SeedRow]:
+    """Materialize BDL catalog + housing indicators as SeedRows.
+
+    BDL doesn't publish a clean PLN/m² figure for powiats, so price stays None.
+    What we gain is coverage: every powiat exists in the DB with a TERYT code,
+    a parent voivodeship and the most recent 'dwellings completed' count as
+    a proxy for transaction volume.
+    """
+    catalog = fetch_all_housing_per_powiat()
+    rows: list[SeedRow] = []
+    for teryt, data in catalog.items():
+        # Prefer 'dwellings_completed' (mieszkania oddane) but BDL var ID
+        # may be missing — fall back to 'permits' (pozwolenia na budowę).
+        transactions = data.get("dwellings_completed") or data.get("permits") or 0
+        year = (
+            data.get("dwellings_completed_year")
+            or data.get("permits_year")
+            or 2024
+        )
+        rows.append(SeedRow(
+            voivodeship=data["voivodeship"],
+            city=data["name"],
+            property_type="apartment",
+            market="mixed",
+            year=year,
+            quarter=4,
+            avg_price_per_m2=None,
+            transactions=int(transactions),
+            powiat=data["name"],
+            teryt_code=teryt,
+        ))
+    return rows
+
+
+def fetch_rcn_powiats() -> list[SeedRow]:
+    """RCN dump aggregated to (powiat, year, quarter, market) -> avg PLN/m².
+
+    Returns [] on any failure; the per-powiat skeleton from BDL still gives us
+    coverage so downstream views don't break.
+    """
+    return fetch_rcn_per_powiat()
+
+
 def refresh_all(triggered_by: str = "scheduler") -> list[DataRefreshLog]:
     """Refresh data from every configured source. Returns log entries."""
     results = [
         _run_one_source("dane.gov.pl", fetch_dane_gov_pl_real_estate, triggered_by),
         _run_one_source("RCN", fetch_rcn, triggered_by),
+        _run_one_source("GUS-BDL", fetch_bdl_powiats, triggered_by),
+        _run_one_source("RCN-dump", fetch_rcn_powiats, triggered_by),
     ]
     return results
 

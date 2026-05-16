@@ -46,6 +46,8 @@ def admin_required(view):
 # ---------------------------------------------------------------------------
 
 def _city_records_latest():
+    # Restrict to rows that actually carry a price/m² — BDL rows for whole
+    # powiats are price-less and shouldn't pollute the city dashboard.
     subq = (
         db.session.query(
             RealEstateRecord.city,
@@ -53,6 +55,7 @@ def _city_records_latest():
         )
         .filter(RealEstateRecord.city.isnot(None))
         .filter(RealEstateRecord.property_type == "apartment")
+        .filter(RealEstateRecord.avg_price_per_m2.isnot(None))
         .group_by(RealEstateRecord.city)
         .subquery()
     )
@@ -63,6 +66,7 @@ def _city_records_latest():
             & ((RealEstateRecord.year * 10 + RealEstateRecord.quarter) == subq.c.max_yq),
         )
         .filter(RealEstateRecord.property_type == "apartment")
+        .filter(RealEstateRecord.avg_price_per_m2.isnot(None))
         .all()
     )
 
@@ -118,6 +122,7 @@ def _cities_payload(include_affordability: bool = False):
 def _voivodeship_trend():
     rows = (
         RealEstateRecord.query.filter(RealEstateRecord.market == "mixed")
+        .filter(RealEstateRecord.avg_price_per_m2.isnot(None))
         .order_by(RealEstateRecord.year.asc())
         .all()
     )
@@ -135,6 +140,50 @@ def _voivodeship_latest_price() -> dict[str, float]:
     for r in rows:
         grouped[r.voivodeship].append(r.avg_price_per_m2)
     return {v: round(sum(p) / len(p), 0) for v, p in grouped.items() if p}
+
+
+def _powiats_payload() -> list[dict]:
+    """One row per (voivodeship, powiat) with merged best-effort numbers
+    across all sources: latest avg PLN/m² from RCN-dump, transaction volume
+    proxy from BDL (dwellings completed)."""
+    rows = (
+        RealEstateRecord.query.filter(RealEstateRecord.powiat.isnot(None))
+        .order_by(RealEstateRecord.year.desc(), RealEstateRecord.quarter.desc())
+        .all()
+    )
+    by_key: dict[tuple, dict] = {}
+    for r in rows:
+        key = (r.voivodeship, r.powiat)
+        bucket = by_key.setdefault(key, {
+            "voivodeship": r.voivodeship,
+            "powiat": r.powiat,
+            "teryt_code": r.teryt_code,
+            "avg_price_per_m2": None,
+            "transactions": None,
+            "year": None,
+            "quarter": None,
+            "sources": set(),
+        })
+        bucket["sources"].add(r.source)
+        if not bucket["teryt_code"] and r.teryt_code:
+            bucket["teryt_code"] = r.teryt_code
+        # First non-null price wins (records are ordered newest-first)
+        if bucket["avg_price_per_m2"] is None and r.avg_price_per_m2:
+            bucket["avg_price_per_m2"] = r.avg_price_per_m2
+            bucket["year"] = r.year
+            bucket["quarter"] = r.quarter
+        if bucket["transactions"] is None and r.transactions:
+            bucket["transactions"] = r.transactions
+            if not bucket["year"]:
+                bucket["year"] = r.year
+                bucket["quarter"] = r.quarter
+
+    out = []
+    for b in by_key.values():
+        b["sources"] = sorted(b["sources"])
+        out.append(b)
+    out.sort(key=lambda x: (x["voivodeship"], x["powiat"]))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +315,28 @@ def finance_view():
         gold=gold,
         latest_fetched=get_latest_fetched_at(),
     )
+
+
+@main_bp.route("/powiaty")
+@login_required
+def powiaty_view():
+    powiats = _powiats_payload()
+    voivodeships = sorted({p["voivodeship"] for p in powiats})
+    return render_template(
+        "powiaty.html",
+        powiats=powiats,
+        voivodeships=voivodeships,
+        latest_fetched=get_latest_fetched_at(),
+    )
+
+
+@main_bp.route("/api/powiats")
+@login_required
+def api_powiats():
+    return jsonify({
+        "data": _powiats_payload(),
+        "fetched_at": get_latest_fetched_at().isoformat() if get_latest_fetched_at() else None,
+    })
 
 
 @main_bp.route("/watchlist")

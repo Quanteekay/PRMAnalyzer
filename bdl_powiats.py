@@ -24,27 +24,6 @@ _PAGE_SIZE = 100
 log = logging.getLogger(__name__)
 
 
-# Mapping of BDL voivodeship-id prefix (first 4 chars of any powiat unit-id)
-# to our internal voivodeship name. The 4-char prefix is stable in BDL.
-_VOIV_BY_BDL_PREFIX = {
-    "0212": "dolnośląskie",
-    "0222": "kujawsko-pomorskie",
-    "0232": "lubelskie",
-    "0242": "lubuskie",
-    "0252": "łódzkie",
-    "0262": "małopolskie",
-    "0272": "mazowieckie",
-    "0282": "opolskie",
-    "0292": "podkarpackie",
-    "0302": "podlaskie",
-    "0312": "pomorskie",
-    "0322": "śląskie",
-    "0332": "świętokrzyskie",
-    "0342": "warmińsko-mazurskie",
-    "0352": "wielkopolskie",
-    "0362": "zachodniopomorskie",
-}
-
 # BDL variable IDs for housing — sourced from BDL's variable catalog
 # (https://bdl.stat.gov.pl). If a variable is unavailable, we log a warning
 # and continue without it (graceful degradation).
@@ -54,18 +33,45 @@ BDL_VARS_HOUSING = {
 }
 
 
-def _voivodeship_for(unit_id: str) -> str | None:
-    if not unit_id or len(unit_id) < 4:
-        return None
-    return _VOIV_BY_BDL_PREFIX.get(unit_id[:4])
+def _fetch_voivodeship_map() -> dict[str, str]:
+    """Live-fetch BDL voivodeship IDs (level=2). Returns {4-char prefix: name}.
+
+    The 4-char prefix of a BDL unit-id is shared between a voivodeship and all
+    its descendant powiats (we verified empirically against the BDL response),
+    so we use it as the join key — no need to walk the parent chain.
+    """
+    try:
+        r = requests.get(
+            f"{_BDL_BASE}/units",
+            params={"level": 2, "page-size": 100, "format": "json"},
+            timeout=_HTTP_TIMEOUT,
+        )
+        r.raise_for_status()
+        payload = r.json()
+    except Exception as exc:  # pragma: no cover - network
+        log.warning("BDL: voivodeship map fetch failed: %s", exc)
+        return {}
+
+    out: dict[str, str] = {}
+    for entry in payload.get("results", []):
+        unit_id = entry.get("id", "")
+        name = (entry.get("name") or "").strip().lower()
+        if len(unit_id) >= 4 and name:
+            out[unit_id[:4]] = name
+    log.info("BDL: voivodeship map built from %d entries", len(out))
+    return out
 
 
 def fetch_powiat_catalog() -> list[dict]:
     """Return [{'teryt_code', 'name', 'voivodeship'}] for every BDL powiat.
 
-    BDL: level=5 = powiat. Returns up to ~380 entries.
+    BDL: level=5 = powiat. Roughly 380 entries.
     Empty list on total failure (caller decides whether to fall back).
     """
+    voiv_map = _fetch_voivodeship_map()
+    if not voiv_map:
+        return []
+
     powiats: list[dict] = []
     page = 0
     while True:
@@ -89,7 +95,7 @@ def fetch_powiat_catalog() -> list[dict]:
 
         for entry in results:
             unit_id = entry.get("id", "")
-            voiv = _voivodeship_for(unit_id)
+            voiv = voiv_map.get(unit_id[:4]) if unit_id else None
             if not voiv:
                 continue
             powiats.append({

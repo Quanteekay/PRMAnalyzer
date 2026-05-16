@@ -36,19 +36,21 @@ def _scheduled_refresh(app: Flask) -> None:
 
 
 def _migrate_schema(app: Flask) -> None:
-    """SQLite-friendly schema migration: ADD COLUMN for new fields when missing.
+    """SQLite-friendly schema migration: ADD COLUMN for new fields + relax
+    NOT NULL on avg_price_per_m2 (BDL doesn't provide this figure).
 
     Allows the model to evolve without dropping the user's existing rcn.db.
-    Each new column is added only if PRAGMA table_info() shows it missing.
     """
     if not app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
         return  # PostgreSQL/MySQL caller is on their own — use Flask-Migrate
+
     new_columns = {
         "real_estate_records": [
             ("powiat", "VARCHAR(128)"),
             ("teryt_code", "VARCHAR(16)"),
         ],
     }
+    rebuild_needed = False
     with db.engine.connect() as conn:
         for table, cols in new_columns.items():
             existing = {
@@ -60,6 +62,20 @@ def _migrate_schema(app: Flask) -> None:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}"))
                 log.info("migrate: added %s.%s (%s)", table, col_name, col_type)
             conn.commit()
+
+        # SQLite can't relax NOT NULL in place — drop the table if the price
+        # column still has the old non-null constraint. ensure_initial_data()
+        # immediately afterwards repopulates everything from seed + live fetch.
+        info = list(conn.execute(text("PRAGMA table_info(real_estate_records)")))
+        avg_col = next((r for r in info if r[1] == "avg_price_per_m2"), None)
+        if avg_col and avg_col[3]:  # notnull == 1
+            log.info("migrate: dropping real_estate_records to relax NOT NULL — refresh will rebuild")
+            conn.execute(text("DROP TABLE real_estate_records"))
+            conn.commit()
+            rebuild_needed = True
+
+    if rebuild_needed:
+        db.create_all()  # recreates real_estate_records with the new schema
 
 
 def _seed_admin(app: Flask) -> None:
