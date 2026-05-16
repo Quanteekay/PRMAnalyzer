@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}403 — Brak dostępu{% endblock %}
+{% block content %}
+<div class="error-shell">
+    <div>
+        <h1 class="error-code">403</h1>
+        <h2>Ta sekcja jest tylko dla administratorów</h2>
+        <p class="muted" style="max-width: 460px; margin: 0 auto 22px;">
+            Zaloguj się na konto z uprawnieniami administratora, aby pobierać świeże dane i zarządzać bazą.
+        </p>
+        <a href="{{ url_for('main.index') }}" class="btn btn-ghost">← Wróć na stronę główną</a>
+    </div>
+</div>
+{% endblock %}

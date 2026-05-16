@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -sL \"https://raw.githubusercontent.com/ppatrzyk/polska-geojson/master/wojewodztwa/wojewodztwa-min.geojson\" -o /Users/piotr/Documents/PythonProject/static/data/voivodeships.geojson --create-dirs)"
+    ]
+  }
+}

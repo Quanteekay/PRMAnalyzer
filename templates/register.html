@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Rejestracja — PRMAnalyzer{% endblock %}
+
+{% block content %}
+<div class="auth-shell">
+    <div class="auth-card">
+        <h2>Załóż konto</h2>
+        <p class="lead">Konto otwiera dostęp do dashboardu i analiz.</p>
+
+        <form method="post" novalidate>
+            {{ form.hidden_tag() }}
+
+            <div class="form-group">
+                {{ form.username.label }}
+                {{ form.username(class="form-input", placeholder="login") }}
+                {% for err in form.username.errors %}<div class="form-error">{{ err }}</div>{% endfor %}
+            </div>
+
+            <div class="form-group">
+                {{ form.email.label }}
+                {{ form.email(class="form-input", placeholder="email@domena.pl") }}
+                {% for err in form.email.errors %}<div class="form-error">{{ err }}</div>{% endfor %}
+            </div>
+
+            <div class="form-group">
+                {{ form.password.label }}
+                {{ form.password(class="form-input", placeholder="min. 6 znaków") }}
+                {% for err in form.password.errors %}<div class="form-error">{{ err }}</div>{% endfor %}
+            </div>
+
+            <div class="form-group">
+                {{ form.confirm.label }}
+                {{ form.confirm(class="form-input", placeholder="powtórz hasło") }}
+                {% for err in form.confirm.errors %}<div class="form-error">{{ err }}</div>{% endfor %}
+            </div>
+
+            {{ form.submit(class="btn btn-primary btn-block") }}
+        </form>
+
+        <div class="form-foot">
+            Masz już konto? <a href="{{ url_for('auth.login') }}">Zaloguj się</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

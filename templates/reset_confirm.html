@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Ustaw nowe hasło — PRMAnalyzer{% endblock %}
+
+{% block content %}
+<div class="auth-shell">
+    <div class="auth-card">
+        <h2>Nowe hasło</h2>
+        <p class="lead">Ustaw nowe hasło dla swojego konta.</p>
+
+        <form method="post" novalidate>
+            {{ form.hidden_tag() }}
+
+            <div class="form-group">
+                {{ form.password.label }}
+                {{ form.password(class="form-input", placeholder="min. 6 znaków") }}
+                {% for err in form.password.errors %}<div class="form-error">{{ err }}</div>{% endfor %}
+            </div>
+
+            <div class="form-group">
+                {{ form.confirm.label }}
+                {{ form.confirm(class="form-input", placeholder="powtórz hasło") }}
+                {% for err in form.confirm.errors %}<div class="form-error">{{ err }}</div>{% endfor %}
+            </div>
+
+            {{ form.submit(class="btn btn-primary btn-block") }}
+        </form>
+    </div>
+</div>
+{% endblock %}

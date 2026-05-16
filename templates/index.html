@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+    <span class="hero-eyebrow"><span class="dot"></span>Dane na żywo z dane.gov.pl & RCN</span>
+    <h1>Polski rynek mieszkaniowy<br><span class="accent">w jednym dashboardzie.</span></h1>
+    <p class="lead">
+        Średnie ceny m², liczba transakcji i trendy w 16 województwach.
+        Aktualizowane automatycznie z publicznych źródeł — Rejestru Cen Nieruchomości
+        oraz portalu dane.gov.pl.
+    </p>
+
+    <div class="hero-actions">
+        {% if current_user.is_authenticated %}
+            <a href="{{ url_for('main.dashboard') }}" class="btn btn-primary">Otwórz Dashboard →</a>
+            <a href="{{ url_for('main.analytics') }}" class="btn btn-ghost">Analityka</a>
+        {% else %}
+            <a href="{{ url_for('auth.register') }}" class="btn btn-primary">Załóż konto za darmo</a>
+            <a href="{{ url_for('auth.login') }}" class="btn btn-ghost">Mam już konto</a>
+        {% endif %}
+    </div>
+
+    <div style="margin-top: 32px;">
+        <span class="freshness">
+            <span class="dot"></span>
+            Ostatnia aktualizacja: <strong>{{ latest_fetched | datetime }}</strong>
+        </span>
+    </div>
+</section>
+
+<section class="section">
+    <div class="kpi-grid">
+        <div class="kpi" data-accent="1">
+            <div class="kpi-label">Średnia cena m²</div>
+            <div class="kpi-value">{{ kpis.avg | price }}</div>
+            <div class="kpi-meta">Średnia z {{ kpis.cities }} miast wojewódzkich</div>
+        </div>
+        <div class="kpi" data-accent="2">
+            <div class="kpi-label">Najwyższa cena m²</div>
+            <div class="kpi-value">{{ kpis.max | price }}</div>
+            <div class="kpi-meta kpi-up">Stolica rynku premium</div>
+        </div>
+        <div class="kpi" data-accent="3">
+            <div class="kpi-label">Najniższa cena m²</div>
+            <div class="kpi-value">{{ kpis.min | price }}</div>
+            <div class="kpi-meta">Najbardziej dostępny rynek</div>
+        </div>
+        <div class="kpi" data-accent="1">
+            <div class="kpi-label">Transakcje (kwartał)</div>
+            <div class="kpi-value">{{ kpis.tx | number }}</div>
+            <div class="kpi-meta">Suma w głównych miastach</div>
+        </div>
+    </div>
+</section>
+
+<section class="section">
+    <div class="section-head">
+        <div>
+            <h2>Co znajdziesz w PRMAnalyzer?</h2>
+            <div class="sub">Wszystko czego potrzebujesz, aby zrozumieć rynek mieszkaniowy w Polsce.</div>
+        </div>
+    </div>
+
+    <div class="feature-grid">
+        <div class="feature">
+            <div class="feature-icon">⊕</div>
+            <h3>Dane na żywo</h3>
+            <p>Łączymy się bezpośrednio z API dane.gov.pl oraz RCN. Scheduler odświeża bazę co kilka godzin — bez Twojej ingerencji.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon">◢</div>
+            <h3>16 województw</h3>
+            <p>Pełne pokrycie kraju: rynek pierwotny, wtórny, ceny m² oraz wolumen transakcji w każdym mieście wojewódzkim.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon">↗</div>
+            <h3>Trendy 2020–2024</h3>
+            <p>Wykresy zmian cen w czasie pokazują dokładnie, gdzie i jak szybko rośnie rynek mieszkaniowy.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon">⌬</div>
+            <h3>Lokalna baza SQLite</h3>
+            <p>Dane przechowywane lokalnie — szybki dostęp, pełna prywatność, historia każdej aktualizacji w dzienniku.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon">⚲</div>
+            <h3>Konta użytkowników</h3>
+            <p>Logowanie oparte o bazę danych z hashowaniem haseł. Pełna analityka dostępna po uwierzytelnieniu.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon">⚙</div>
+            <h3>Panel administratora</h3>
+            <p>Tylko admin może wymusić natychmiastowe pobranie świeżych danych ze źródeł zewnętrznych.</p>
+        </div>
+    </div>
+</section>
+
+<section class="section">
+    <div class="card" style="text-align:center; padding: 48px 24px;">
+        <h2>Gotowy/-a, aby zobaczyć szczegóły?</h2>
+        <p class="muted" style="max-width: 540px; margin: 0 auto 22px;">
+            Po zalogowaniu uzyskasz dostęp do interaktywnych wykresów, rankingu miast oraz pełnej tabeli z danymi.
+        </p>
+        {% if current_user.is_authenticated %}
+            <a href="{{ url_for('main.dashboard') }}" class="btn btn-primary">Otwórz Dashboard</a>
+        {% else %}
+            <a href="{{ url_for('auth.register') }}" class="btn btn-primary">Zarejestruj się</a>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}

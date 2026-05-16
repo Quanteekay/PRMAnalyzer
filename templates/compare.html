@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Porównywarka miast — PRMAnalyzer{% endblock %}
+
+{% block content %}
+<section class="section" style="margin-top: 12px;">
+    <div class="section-head">
+        <div>
+            <h2>Porównywarka miast</h2>
+            <div class="sub">Wybierz 2–5 miast i porównaj ceny, transakcje i wskaźniki dostępności.</div>
+        </div>
+        <span class="freshness">
+            <span class="dot"></span>
+            Dane z: <strong>{{ latest_fetched | datetime }}</strong>
+        </span>
+    </div>
+
+    <div class="card" style="margin-bottom: 22px;">
+        <h3 style="margin-bottom: 14px;">Wybierz miasta</h3>
+        <form method="get" id="compare-form">
+            <div class="city-grid">
+                {% for city in all_cities %}
+                <label class="city-check">
+                    <input type="checkbox" name="city" value="{{ city }}"
+                           {% if city in (selected | map(attribute='city') | list) %}checked{% endif %}>
+                    <span>{{ city }}</span>
+                </label>
+                {% endfor %}
+            </div>
+            <div class="row" style="margin-top: 16px;">
+                <button type="submit" class="btn btn-primary">Porównaj</button>
+                <a href="{{ url_for('main.compare') }}" class="btn btn-ghost">Wyczyść</a>
+            </div>
+        </form>
+    </div>
+
+    {% if selected %}
+    <div class="card chart-card" style="margin-bottom: 22px;">
+        <div class="card-title">
+            <h3>Porównanie cen m²</h3>
+            <span class="sub">pierwotny vs wtórny</span>
+        </div>
+        <canvas id="chart-compare"></canvas>
+    </div>
+
+    <div class="compare-grid">
+        {% for c in selected %}
+        <div class="card compare-card">
+            <div class="row between">
+                <h3 style="margin: 0;">{{ c.city }}</h3>
+                <span class="pill">{{ c.voivodeship }}</span>
+            </div>
+            <div class="kpi-row">
+                <div class="kpi-mini">
+                    <div class="kpi-label">Pierwotny</div>
+                    <div class="kpi-mini-val">{{ c.primary | price }}</div>
+                </div>
+                <div class="kpi-mini">
+                    <div class="kpi-label">Wtórny</div>
+                    <div class="kpi-mini-val">{{ c.secondary | price }}</div>
+                </div>
+            </div>
+            <div class="kpi-row">
+                <div class="kpi-mini">
+                    <div class="kpi-label">Transakcje</div>
+                    <div class="kpi-mini-val">{{ c.tx_total | number }}</div>
+                </div>
+                <div class="kpi-mini">
+                    <div class="kpi-label">Wynagr. woj.</div>
+                    <div class="kpi-mini-val">{{ c.wage | price }}</div>
+                </div>
+            </div>
+            {% if c.affordability %}
+            <div style="border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px;">
+                <div class="kpi-label" style="margin-bottom: 8px;">Wskaźnik dostępności</div>
+                <div class="row between">
+                    <span class="muted">1 m² to</span>
+                    <strong>{{ c.affordability.months_for_1m2 | months }}</strong>
+                </div>
+                <div class="row between">
+                    <span class="muted">50 m² to</span>
+                    <strong>{{ c.affordability.months_for_50m2 | months }}</strong>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card" style="text-align: center; padding: 48px 24px;">
+        <p class="muted">Zaznacz miasta powyżej, aby zobaczyć porównanie.</p>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+{% if selected %}
+<script>
+    window.RCN_COMPARE = {{ selected | tojson }};
+    document.addEventListener('DOMContentLoaded', () => {
+        if (window.renderCompareChart) window.renderCompareChart();
+    });
+</script>
+{% endif %}
+{% endblock %}

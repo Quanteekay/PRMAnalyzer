@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}PRMAnalyzer — Analizator polskiego rynku mieszkaniowego{% endblock %}</title>
+    <meta name="description" content="PRMAnalyzer — analityka cen nieruchomości w Polsce w oparciu o RCN i dane.gov.pl. Dane aktualizowane na żywo.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0%25' stop-color='%237c5cff'/><stop offset='100%25' stop-color='%2300d4ff'/></linearGradient></defs><rect width='32' height='32' rx='8' fill='url(%23g)'/><text x='16' y='22' text-anchor='middle' font-family='Geist,sans-serif' font-weight='700' font-size='13' fill='white'>P</text></svg>">
+    {% block head_extra %}{% endblock %}
+</head>
+<body>
+
+<nav class="navbar">
+    <div class="container navbar-inner">
+        <a href="{{ url_for('main.index') }}" class="brand">
+            <span class="brand-logo">P</span>
+            <span>
+                PRMAnalyzer
+                <small>Polski rynek mieszkaniowy</small>
+            </span>
+        </a>
+        <div class="nav-links">
+            <a href="{{ url_for('main.index') }}" class="nav-link {% if request.endpoint == 'main.index' %}active{% endif %}">Start</a>
+            {% if current_user.is_authenticated %}
+                <a href="{{ url_for('main.dashboard') }}" class="nav-link {% if request.endpoint == 'main.dashboard' %}active{% endif %}">Dashboard</a>
+                <a href="{{ url_for('main.analytics') }}" class="nav-link {% if request.endpoint == 'main.analytics' %}active{% endif %}">Analityka</a>
+                <a href="{{ url_for('main.map_view') }}" class="nav-link {% if request.endpoint == 'main.map_view' %}active{% endif %}">Mapa</a>
+                <a href="{{ url_for('main.compare') }}" class="nav-link {% if request.endpoint == 'main.compare' %}active{% endif %}">Porównaj</a>
+                <a href="{{ url_for('main.predictions_view') }}" class="nav-link {% if request.endpoint == 'main.predictions_view' %}active{% endif %}">Predykcje</a>
+                <a href="{{ url_for('main.finance_view') }}" class="nav-link {% if request.endpoint == 'main.finance_view' %}active{% endif %}">Finanse</a>
+                {% if current_user.is_admin %}
+                    <a href="{{ url_for('main.admin') }}" class="nav-link {% if request.endpoint == 'main.admin' %}active{% endif %}">Admin</a>
+                {% endif %}
+            {% endif %}
+
+            <button id="theme-toggle" class="nav-link theme-toggle" type="button" aria-label="Przełącz motyw">
+                <span class="theme-icon">◐</span>
+            </button>
+
+            {% if current_user.is_authenticated %}
+                <div class="user-menu">
+                    <span class="nav-link" title="{{ current_user.email }}">
+                        {{ current_user.username }}
+                        {% if current_user.is_admin %}<span class="badge-admin">Admin</span>{% endif %}
+                    </span>
+                    <a href="{{ url_for('auth.logout') }}" class="nav-link">Wyloguj</a>
+                </div>
+            {% else %}
+                <a href="{{ url_for('auth.login') }}" class="nav-link">Zaloguj</a>
+                <a href="{{ url_for('auth.register') }}" class="nav-link cta">Załóż konto</a>
+            {% endif %}
+        </div>
+    </div>
+</nav>
+
+<main>
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-area">
+                    {% for category, msg in messages %}
+                        <div class="flash {{ category }}">{{ msg }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+</main>
+
+<footer>
+    <div class="container">
+        <p>
+            © {{ current_year }} PRMAnalyzer &middot; projekt edukacyjny &middot;
+            źródła: <a href="https://dane.gov.pl" target="_blank" rel="noopener">dane.gov.pl</a>,
+            RCN — Rejestr Cen Nieruchomości
+        </p>
+    </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Analityka — PRMAnalyzer{% endblock %}
+
+{% block content %}
+<section class="section" style="margin-top: 12px;">
+    <div class="section-head">
+        <div>
+            <h2>Analityka</h2>
+            <div class="sub">Trendy cen m² w czasie oraz porównanie pomiędzy województwami.</div>
+        </div>
+        <span class="freshness">
+            <span class="dot"></span>
+            Dane z: <strong>{{ latest_fetched | datetime }}</strong>
+        </span>
+    </div>
+
+    <div class="card chart-card" style="margin-bottom: 22px;">
+        <div class="card-title">
+            <h3>Trend cen m² w latach 2020–2024</h3>
+            <span class="sub">średnie wojewódzkie</span>
+        </div>
+        <canvas id="chart-trend" style="height: 380px !important;"></canvas>
+    </div>
+
+    <div class="chart-grid">
+        <div class="card chart-card">
+            <div class="card-title">
+                <h3>Ranking rynku pierwotnego</h3>
+                <span class="sub">Top 10 miast</span>
+            </div>
+            <canvas id="chart-primary-bar"></canvas>
+        </div>
+        <div class="card chart-card">
+            <div class="card-title">
+                <h3>Spread P/W</h3>
+                <span class="sub">różnica cena pierwotna − wtórna</span>
+            </div>
+            <canvas id="chart-spread"></canvas>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    window.PRM_DATA = {
+        cities: {{ cities | tojson }},
+        trend: {{ trend | tojson }}
+    };
+    document.addEventListener('DOMContentLoaded', () => {
+        if (window.renderAnalyticsCharts) window.renderAnalyticsCharts();
+    });
+</script>
+{% endblock %}

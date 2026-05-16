@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Finanse — PRMAnalyzer{% endblock %}
+
+{% block content %}
+<section class="section" style="margin-top: 12px;">
+    <div class="section-head">
+        <div>
+            <h2>Finanse</h2>
+            <div class="sub">Kursy walut NBP, cena złota i kalkulator opłacalności inwestycji w mieszkanie.</div>
+        </div>
+        <span class="freshness">
+            <span class="dot"></span>
+            Dane z: <strong>{{ latest_fetched | datetime }}</strong>
+        </span>
+    </div>
+
+    <div class="kpi-grid">
+        {% for r in rates %}
+        <div class="kpi" data-accent="{{ loop.index0 % 3 + 1 }}">
+            <div class="kpi-label">{{ r.code }} → PLN</div>
+            <div class="kpi-value">{{ '%.4f' | format(r.rate) }}</div>
+            <div class="kpi-meta">{{ r.name }} · {{ r.date }}</div>
+        </div>
+        {% endfor %}
+        {% if gold %}
+        <div class="kpi" data-accent="2">
+            <div class="kpi-label">Złoto (1g)</div>
+            <div class="kpi-value">{{ '%.2f' | format(gold.price) }} zł</div>
+            <div class="kpi-meta">NBP · {{ gold.date }}</div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card" style="margin-top: 22px;">
+        <h3>Kalkulator zdolności na mieszkanie</h3>
+        <p class="muted">Wpisz miesięczne wynagrodzenie netto i zobacz, ile metrów kwadratowych możesz kupić w wybranym mieście (cena z dashboardu, 100% wynagrodzenia).</p>
+        <div class="row" style="gap: 14px; margin-top: 14px; flex-wrap: wrap;">
+            <div class="form-group" style="margin: 0;">
+                <label>Twoje wynagrodzenie netto (zł)</label>
+                <input id="calc-wage" type="number" class="form-input" placeholder="np. 8000" min="0">
+            </div>
+            <div class="form-group" style="margin: 0;">
+                <label>Cena za m² (zł)</label>
+                <input id="calc-price" type="number" class="form-input" placeholder="np. 12000" min="0">
+            </div>
+            <div class="form-group" style="margin: 0;">
+                <label>Procent dochodu na ratę (%)</label>
+                <input id="calc-pct" type="number" class="form-input" value="30" min="0" max="100">
+            </div>
+        </div>
+        <div id="calc-result" class="row" style="gap: 14px; margin-top: 16px; flex-wrap: wrap;"></div>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const wage = document.getElementById('calc-wage');
+        const price = document.getElementById('calc-price');
+        const pct = document.getElementById('calc-pct');
+        const out = document.getElementById('calc-result');
+        const recalc = () => {
+            const w = parseFloat(wage.value) || 0;
+            const p = parseFloat(price.value) || 0;
+            const pc = (parseFloat(pct.value) || 30) / 100;
+            if (!w || !p) { out.innerHTML = ''; return; }
+            const monthly = w * pc;
+            const months_per_m2 = p / w;
+            const years_for_50m2 = (p * 50) / (w * 12);
+            out.innerHTML = `
+                <div class="kpi-mini"><div class="kpi-label">Rata miesięczna (${(pc*100).toFixed(0)}%)</div>
+                    <div class="kpi-mini-val">${monthly.toLocaleString('pl-PL', {maximumFractionDigits:0})} zł</div></div>
+                <div class="kpi-mini"><div class="kpi-label">Miesięcy na 1 m²</div>
+                    <div class="kpi-mini-val">${months_per_m2.toFixed(1)}</div></div>
+                <div class="kpi-mini"><div class="kpi-label">Lat pracy na 50 m²</div>
+                    <div class="kpi-mini-val">${years_for_50m2.toFixed(1)}</div></div>
+            `;
+        };
+        [wage, price, pct].forEach(el => el.addEventListener('input', recalc));
+    });
+</script>
+{% endblock %}

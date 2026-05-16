@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}429 — Zbyt wiele żądań{% endblock %}
+{% block content %}
+<div class="error-shell">
+    <div>
+        <h1 class="error-code">429</h1>
+        <h2>Zbyt wiele żądań w krótkim czasie</h2>
+        <p class="muted">Spróbuj ponownie za chwilę. Limit chroni serwis przed nadużyciami.</p>
+        <a href="{{ url_for('main.index') }}" class="btn btn-ghost">← Strona główna</a>
+    </div>
+</div>
+{% endblock %}

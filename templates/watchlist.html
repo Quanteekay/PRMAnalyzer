@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Watchlist — PRMAnalyzer{% endblock %}
+
+{% block content %}
+<section class="section" style="margin-top: 12px;">
+    <div class="section-head">
+        <div>
+            <h2>Moja Watchlist</h2>
+            <div class="sub">Miasta przypięte do szybkiego podglądu.</div>
+        </div>
+        <span class="freshness">
+            <span class="dot"></span>
+            Dane z: <strong>{{ latest_fetched | datetime }}</strong>
+        </span>
+    </div>
+
+    {% if cities %}
+    <div class="table-wrap">
+        <table class="data">
+            <thead>
+                <tr>
+                    <th>Miasto</th>
+                    <th class="numeric">Pierwotny</th>
+                    <th class="numeric">Wtórny</th>
+                    <th class="numeric">Wskaźnik 50m²</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for c in cities %}
+                <tr>
+                    <td>
+                        <div class="city">{{ c.city }}</div>
+                        <div class="muted" style="font-size:.78rem;">{{ c.voivodeship }}</div>
+                    </td>
+                    <td class="numeric"><strong>{{ c.primary | price }}</strong></td>
+                    <td class="numeric">{{ c.secondary | price }}</td>
+                    <td class="numeric">{{ (c.affordability.months_for_50m2 if c.affordability else None) | months }}</td>
+                    <td>
+                        <button class="btn btn-ghost watch-toggle" data-city="{{ c.city }}" data-watched="1">★ usuń</button>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="card" style="text-align:center; padding: 56px 24px;">
+        <p class="muted" style="margin-bottom: 18px;">Twoja watchlist jest pusta.</p>
+        <a href="{{ url_for('main.dashboard') }}" class="btn btn-primary">Wybierz miasta z dashboardu</a>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

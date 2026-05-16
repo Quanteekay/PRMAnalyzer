@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Reset hasła — PRMAnalyzer{% endblock %}
+
+{% block content %}
+<div class="auth-shell">
+    <div class="auth-card">
+        <h2>Reset hasła</h2>
+        <p class="lead">Podaj email — wyślemy link resetujący.</p>
+
+        <form method="post" novalidate>
+            {{ form.hidden_tag() }}
+
+            <div class="form-group">
+                {{ form.email.label }}
+                {{ form.email(class="form-input", placeholder="email@domena.pl") }}
+                {% for err in form.email.errors %}<div class="form-error">{{ err }}</div>{% endfor %}
+            </div>
+
+            {{ form.submit(class="btn btn-primary btn-block") }}
+        </form>
+
+        <div class="form-foot">
+            <a href="{{ url_for('auth.login') }}">← Powrót do logowania</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

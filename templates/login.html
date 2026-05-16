@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Logowanie — PRMAnalyzer{% endblock %}
+
+{% block content %}
+<div class="auth-shell">
+    <div class="auth-card">
+        <h2>Witaj z powrotem</h2>
+        <p class="lead">Zaloguj się, aby uzyskać dostęp do analityki.</p>
+
+        <form method="post" novalidate>
+            {{ form.hidden_tag() }}
+
+            <div class="form-group">
+                {{ form.username.label }}
+                {{ form.username(class="form-input", placeholder="np. admin") }}
+                {% for err in form.username.errors %}<div class="form-error">{{ err }}</div>{% endfor %}
+            </div>
+
+            <div class="form-group">
+                {{ form.password.label }}
+                {{ form.password(class="form-input", placeholder="Twoje hasło") }}
+                {% for err in form.password.errors %}<div class="form-error">{{ err }}</div>{% endfor %}
+            </div>
+
+            <div class="checkbox-row">
+                {{ form.remember() }} {{ form.remember.label }}
+            </div>
+
+            {{ form.submit(class="btn btn-primary btn-block") }}
+        </form>
+
+        <div class="form-foot">
+            Nie masz konta? <a href="{{ url_for('auth.register') }}">Załóż je teraz</a>
+        </div>
+        <div class="form-foot" style="margin-top: 6px;">
+            <a href="{{ url_for('auth.password_reset_request') }}">Zapomniałeś hasła?</a>
+        </div>
+        <div class="form-foot mono" style="margin-top: 8px; font-size:.75rem; color: var(--text-3);">
+            domyślny admin: <strong>admin</strong> / <strong>admin123</strong>
+        </div>
+    </div>
+</div>
+{% endblock %}
