@@ -28,7 +28,6 @@
             {% if current_user.is_authenticated %}
                 <a href="{{ url_for('main.dashboard') }}" class="nav-link {% if request.endpoint == 'main.dashboard' %}active{% endif %}">Dashboard</a>
                 <a href="{{ url_for('main.analytics') }}" class="nav-link {% if request.endpoint == 'main.analytics' %}active{% endif %}">Analityka</a>
-                <a href="{{ url_for('main.powiaty_view') }}" class="nav-link {% if request.endpoint == 'main.powiaty_view' %}active{% endif %}">Powiaty</a>
                 <a href="{{ url_for('main.map_view') }}" class="nav-link {% if request.endpoint == 'main.map_view' %}active{% endif %}">Mapa</a>
                 <a href="{{ url_for('main.compare') }}" class="nav-link {% if request.endpoint == 'main.compare' %}active{% endif %}">Porównaj</a>
                 <a href="{{ url_for('main.predictions_view') }}" class="nav-link {% if request.endpoint == 'main.predictions_view' %}active{% endif %}">Predykcje</a>

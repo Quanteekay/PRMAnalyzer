@@ -183,8 +183,8 @@ window.initTableTools = function (tableSelector) {
                         results.innerHTML = '<div class="search-empty">Brak wyników</div>';
                     } else {
                         results.innerHTML = data.results.map((x) =>
-                            `<a href="/compare?city=${encodeURIComponent(x.city)}" class="search-item">
-                                <strong>${x.city}</strong>
+                            `<a href="/compare?powiat=${encodeURIComponent(x.powiat)}" class="search-item">
+                                <strong>${x.powiat}</strong>
                                 <span class="muted">${x.voivodeship}</span>
                              </a>`
                         ).join('');
@@ -388,36 +388,45 @@ window.renderAnalyticsCharts = function () {
 
 /* ----------------------- Compare chart ----------------------- */
 window.renderCompareChart = function () {
-    const items = window.RCN_COMPARE || [];
+    const items = window.PRM_COMPARE || [];
     const ctx = document.getElementById('chart-compare');
     if (!ctx || !items.length) return;
     const c = ctx.getContext('2d');
     new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: items.map((x) => x.city),
+            labels: items.map((x) => x.powiat),
             datasets: [
                 {
-                    label: 'Pierwotny zł/m²',
-                    data: items.map((x) => x.primary || 0),
+                    label: 'Gęstość (os/km²)',
+                    data: items.map((x) => x.density || 0),
                     backgroundColor: makeGradient(c, 280, 'rgba(124,92,255,0.9)', 'rgba(124,92,255,0.3)'),
                     borderRadius: 6,
+                    yAxisID: 'y',
                 },
                 {
-                    label: 'Wtórny zł/m²',
-                    data: items.map((x) => x.secondary || 0),
+                    label: 'Cena zł/m²',
+                    data: items.map((x) => x.avg_price_per_m2 || 0),
                     backgroundColor: makeGradient(c, 280, 'rgba(0,212,255,0.9)', 'rgba(0,212,255,0.3)'),
                     borderRadius: 6,
+                    yAxisID: 'y1',
                 },
             ],
         },
-        options: baseOpts(),
+        options: {
+            ...baseOpts(),
+            scales: {
+                y: { type: 'linear', position: 'left', title: { display: true, text: 'os/km²' } },
+                y1: { type: 'linear', position: 'right', title: { display: true, text: 'zł/m²' }, grid: { drawOnChartArea: false } },
+                x: baseOpts().scales?.x || {},
+            },
+        },
     });
 };
 
 /* ----------------------- Forecast chart ----------------------- */
 window.renderForecastChart = function () {
-    const result = window.RCN_FORECAST;
+    const result = window.PRM_FORECAST;
     if (!result || !result.historical?.length) return;
     const ctx = document.getElementById('chart-forecast');
     if (!ctx) return;
@@ -426,17 +435,16 @@ window.renderForecastChart = function () {
     const fc = result.forecast || [];
     const labels = [...hist.map((h) => h.year), ...fc.map((f) => f.year)];
 
-    const histLine = hist.map((h) => h.price).concat(fc.map(() => null));
-    // Make forecast start exactly from last historical point
+    const histLine = hist.map((h) => h.value).concat(fc.map(() => null));
     const fcLine = hist.map(() => null);
-    if (hist.length) fcLine[hist.length - 1] = hist[hist.length - 1].price;
-    fc.forEach((f) => fcLine.push(f.price));
+    if (hist.length) fcLine[hist.length - 1] = hist[hist.length - 1].value;
+    fc.forEach((f) => fcLine.push(f.value));
 
     const lowBand = hist.map(() => null).concat(fc.map((f) => f.low));
     const highBand = hist.map(() => null).concat(fc.map((f) => f.high));
     if (hist.length) {
-        lowBand[hist.length - 1] = hist[hist.length - 1].price;
-        highBand[hist.length - 1] = hist[hist.length - 1].price;
+        lowBand[hist.length - 1] = hist[hist.length - 1].value;
+        highBand[hist.length - 1] = hist[hist.length - 1].value;
     }
 
     new Chart(ctx, {
@@ -480,72 +488,122 @@ window.renderForecastChart = function () {
     });
 };
 
-/* ----------------------- Leaflet map ----------------------- */
+/* ----------------------- Leaflet map (powiaty choropleth) ----------------------- */
+function normalizePowiatName(name) {
+    let s = (name || '').toLowerCase().trim();
+    if (s.startsWith('powiat ')) s = s.slice('powiat '.length);
+    for (const m of ['m.st. ', 'm. ', 'm.st.', 'm.']) {
+        if (s.startsWith(m)) { s = s.slice(m.length); break; }
+    }
+    return s.trim();
+}
+
 window.renderMap = async function () {
     const mapEl = document.getElementById('map');
     if (!mapEl || typeof L === 'undefined') return;
 
-    const map = L.map('map', { zoomControl: true }).setView([52.0, 19.3], 6);
+    const data = window.PRM_MAP || {};
+    const powiats = data.powiats || {};
+    const url = data.geojsonUrl || '/static/data/powiaty.geojson';
+
+    const map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([52.0, 19.3], 6);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
-        attribution: '© OpenStreetMap, © CartoDB',
-        maxZoom: 10,
+        attribution: '© OpenStreetMap, © CartoDB', maxZoom: 11,
     }).addTo(map);
-    // Labels layer (city names) on top
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
-        maxZoom: 10,
+        maxZoom: 11,
     }).addTo(map);
 
-    const prices = window.PRM_MAP?.prices || {};
-    const wages = window.PRM_MAP?.wages || {};
-    const all = Object.values(prices);
-    const min = Math.min(...all);
-    const max = Math.max(...all);
+    // Use a log scale on density so the wide range (50–4000+ os/km²) reads well.
+    const allDensity = Object.values(powiats).map(p => p.density).filter(d => d > 0);
+    const logMin = Math.log(Math.max(1, Math.min(...allDensity)));
+    const logMax = Math.log(Math.max(...allDensity, 1));
+    const stops = ['#1d5b80', '#2d8fb3', '#7c5cff', '#ff5cf2', '#ff6080'];
 
-    function colorFor(price) {
-        if (!price) return '#3a3f55';
-        const t = (price - min) / Math.max(1, max - min);
-        // 5-stop gradient
-        const stops = ['#1d5b80', '#2d8fb3', '#7c5cff', '#ff5cf2', '#ff6080'];
+    function colorFor(density) {
+        if (!density || density <= 0) return '#3a3f55';
+        const t = (Math.log(density) - logMin) / Math.max(0.001, logMax - logMin);
         const idx = Math.min(Math.floor(t * stops.length), stops.length - 1);
         return stops[idx];
     }
 
-    const resp = await fetch('/static/data/voivodeships.geojson');
+    let activeVoiv = '';
+
+    function styleFor(feature) {
+        const key = normalizePowiatName(feature.properties.nazwa);
+        const p = powiats[key];
+        const inactive = activeVoiv && p && p.voivodeship !== activeVoiv;
+        return {
+            fillColor: colorFor(p?.density),
+            fillOpacity: inactive ? 0.08 : 0.75,
+            color: inactive ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.4)',
+            weight: 0.6,
+        };
+    }
+
+    const resp = await fetch(url);
     const geo = await resp.json();
 
-    L.geoJSON(geo, {
-        style: (feat) => ({
-            fillColor: colorFor(prices[feat.properties.nazwa]),
-            fillOpacity: 0.78,
-            color: 'rgba(255,255,255,0.5)',
-            weight: 1,
-        }),
-        onEachFeature: (feat, layer) => {
-            const name = feat.properties.nazwa;
-            const price = prices[name];
-            const wage = wages[name];
-            const months = price && wage ? (price / wage).toFixed(2) : '—';
-            layer.bindPopup(`
-                <h4>${name}</h4>
-                <div class="pop-stat"><span>Średnia cena m²</span> <strong>${price ? price.toLocaleString('pl-PL') + ' zł' : '—'}</strong></div>
-                <div class="pop-stat"><span>Wynagrodzenie</span> <strong>${wage ? wage.toLocaleString('pl-PL') + ' zł' : '—'}</strong></div>
-                <div class="pop-stat"><span>Miesięcy na 1 m²</span> <strong>${months}</strong></div>
+    const layer = L.geoJSON(geo, {
+        style: styleFor,
+        onEachFeature: (feat, ly) => {
+            const key = normalizePowiatName(feat.properties.nazwa);
+            const p = powiats[key];
+            const density = p?.density;
+            const price = p?.avg_price_per_m2;
+            ly.bindPopup(`
+                <h4>${p?.powiat || feat.properties.nazwa}</h4>
+                <div class="pop-stat"><span>Województwo</span> <strong>${p?.voivodeship || '—'}</strong></div>
+                <div class="pop-stat"><span>Gęstość</span> <strong>${density ? density.toLocaleString('pl-PL') + ' os/km²' : '—'}</strong></div>
+                <div class="pop-stat"><span>Cena m²</span> <strong>${price ? price.toLocaleString('pl-PL') + ' zł' : '—'}</strong></div>
+                <div class="pop-stat"><span>TERYT/BDL</span> <strong style="font-family:var(--font-mono);font-size:.8em">${p?.teryt_code || '—'}</strong></div>
             `);
-            layer.on('mouseover', () => layer.setStyle({ weight: 3, color: '#fff' }));
-            layer.on('mouseout', () => layer.setStyle({ weight: 1, color: 'rgba(255,255,255,0.5)' }));
+            ly.on('mouseover', () => ly.setStyle({ weight: 2.5, color: '#fff' }));
+            ly.on('mouseout',  () => layer.resetStyle(ly));
         },
     }).addTo(map);
+
+    // Voivodeship filter — fade non-matching powiats and zoom to bbox.
+    const select = document.getElementById('map-voiv-filter');
+    const counter = document.getElementById('map-count');
+    function updateCounter() {
+        const all = Object.values(powiats);
+        const shown = activeVoiv ? all.filter(p => p.voivodeship === activeVoiv).length : all.length;
+        if (counter) counter.textContent = `${shown} powiatów ${activeVoiv ? '(' + activeVoiv + ')' : '(cała Polska)'}`;
+    }
+    updateCounter();
+    if (select) {
+        select.addEventListener('change', () => {
+            activeVoiv = select.value;
+            layer.setStyle(styleFor);
+            updateCounter();
+            if (activeVoiv) {
+                // Zoom to the bounds of polygons that belong to the chosen voivodeship.
+                const matching = [];
+                layer.eachLayer(ly => {
+                    const key = normalizePowiatName(ly.feature.properties.nazwa);
+                    if (powiats[key]?.voivodeship === activeVoiv) matching.push(ly);
+                });
+                if (matching.length) {
+                    const group = L.featureGroup(matching);
+                    map.fitBounds(group.getBounds(), { padding: [20, 20] });
+                }
+            } else {
+                map.setView([52.0, 19.3], 6);
+            }
+        });
+    }
 
     // Legend
     const legend = L.control({ position: 'bottomright' });
     legend.onAdd = () => {
         const div = L.DomUtil.create('div', 'map-legend');
-        const stops = ['#1d5b80', '#2d8fb3', '#7c5cff', '#ff5cf2', '#ff6080'];
-        div.innerHTML = '<strong>Cena m²</strong><br>' + stops.map((color, i) => {
+        const lines = stops.map((color, i) => {
             const t = i / (stops.length - 1);
-            const v = Math.round(min + t * (max - min));
-            return `<span class="swatch" style="background:${color}"></span> ${v.toLocaleString('pl-PL')} zł`;
+            const v = Math.round(Math.exp(logMin + t * (logMax - logMin)));
+            return `<span class="swatch" style="background:${color}"></span> ${v.toLocaleString('pl-PL')} os/km²`;
         }).join('<br>');
+        div.innerHTML = '<strong>Gęstość zaludnienia</strong><br>' + lines;
         return div;
     };
     legend.addTo(map);

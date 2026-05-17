@@ -6,8 +6,11 @@
 <section class="section" style="margin-top: 12px;">
     <div class="section-head">
         <div>
-            <h2>Dashboard rynku</h2>
-            <div class="sub">Migawka kluczowych wskaźników. Klik ★ przy mieście dodaje je do watchlisty.</div>
+            <h2>Dashboard — powiaty</h2>
+            <div class="sub">
+                {{ kpis.total }} powiatów z BDL/RCN. Wskaźnik to gęstość zaludnienia (os/km²) — proxy aktywności rynku.
+                Klik ★ przypina powiat do watchlisty.
+            </div>
         </div>
         <span class="freshness">
             <span class="dot"></span>
@@ -17,43 +20,24 @@
 
     <div class="kpi-grid">
         <div class="kpi" data-accent="1">
-            <div class="kpi-label">Średnia cena m²</div>
-            <div class="kpi-value">{{ kpis.avg | price }}</div>
-            <div class="kpi-meta">{{ kpis.cities }} miast wojewódzkich</div>
+            <div class="kpi-label">Powiatów łącznie</div>
+            <div class="kpi-value">{{ kpis.total | number }}</div>
+            <div class="kpi-meta">pełne pokrycie Polski</div>
         </div>
         <div class="kpi" data-accent="2">
-            <div class="kpi-label">Cena MAX</div>
-            <div class="kpi-value">{{ kpis.max | price }}</div>
-            <div class="kpi-meta kpi-up">↑ rynek premium</div>
+            <div class="kpi-label">MAX gęstość</div>
+            <div class="kpi-value">{{ kpis.max_density | number }}</div>
+            <div class="kpi-meta">os/km² — miasta na prawach powiatu</div>
         </div>
         <div class="kpi" data-accent="3">
-            <div class="kpi-label">Cena MIN</div>
-            <div class="kpi-value">{{ kpis.min | price }}</div>
-            <div class="kpi-meta">najbardziej dostępne miasto</div>
+            <div class="kpi-label">MIN gęstość</div>
+            <div class="kpi-value">{{ kpis.min_density | number }}</div>
+            <div class="kpi-meta">os/km² — powiaty wiejskie</div>
         </div>
         <div class="kpi" data-accent="1">
-            <div class="kpi-label">Transakcje (Q4)</div>
-            <div class="kpi-value">{{ kpis.tx | number }}</div>
-            <div class="kpi-meta">w miastach wojewódzkich</div>
-        </div>
-    </div>
-</section>
-
-<section class="section">
-    <div class="chart-grid">
-        <div class="card chart-card">
-            <div class="card-title">
-                <h3>Ceny m² w miastach wojewódzkich</h3>
-                <span class="sub">rynek pierwotny vs wtórny</span>
-            </div>
-            <canvas id="chart-cities"></canvas>
-        </div>
-        <div class="card chart-card">
-            <div class="card-title">
-                <h3>Rozkład transakcji</h3>
-                <span class="sub">Top 8 miast</span>
-            </div>
-            <canvas id="chart-tx"></canvas>
+            <div class="kpi-label">Z ceną m²</div>
+            <div class="kpi-value">{{ kpis.with_price | number }}</div>
+            <div class="kpi-meta">średnia: {{ kpis.avg_price | price }}</div>
         </div>
     </div>
 </section>
@@ -61,65 +45,67 @@
 <section class="section">
     <div class="section-head">
         <div>
-            <h2>Ranking miast</h2>
-            <div class="sub">Sortowane wg najwyższej ceny m². Filtruj, wyszukuj, eksportuj.</div>
+            <h2>Ranking powiatów</h2>
+            <div class="sub">Filtruj, sortuj, eksportuj. {{ powiats | length }} wierszy.</div>
         </div>
         <div class="row" style="gap: 10px;">
-            <a href="{{ url_for('main.export_cities_csv') }}" class="btn btn-ghost">↓ CSV</a>
-            <a href="{{ url_for('main.export_cities_xlsx') }}" class="btn btn-ghost">↓ XLSX</a>
+            <a href="{{ url_for('main.export_powiats_csv') }}" class="btn btn-ghost">↓ CSV</a>
+            <a href="{{ url_for('main.export_powiats_xlsx') }}" class="btn btn-ghost">↓ XLSX</a>
         </div>
     </div>
 
     <div class="filter-bar">
-        <input type="search" id="filter-input" class="form-input" placeholder="🔍 Filtruj miasto lub województwo…">
+        <input type="search" id="filter-input" class="form-input" placeholder="🔍 Filtruj powiat lub TERYT…">
         <select id="filter-voiv" class="form-input">
             <option value="">Wszystkie województwa</option>
-            {% set voivs = cities | map(attribute='voivodeship') | unique | sort %}
-            {% for v in voivs %}<option>{{ v }}</option>{% endfor %}
+            {% for v in voivodeships %}<option>{{ v }}</option>{% endfor %}
         </select>
         <select id="filter-pagesize" class="form-input">
-            <option value="10">10 / strona</option>
-            <option value="25" selected>25 / strona</option>
-            <option value="50">50 / strona</option>
+            <option value="25">25 / strona</option>
+            <option value="50" selected>50 / strona</option>
+            <option value="100">100 / strona</option>
             <option value="999">wszystkie</option>
         </select>
     </div>
 
     <div class="table-wrap">
-        <table class="data sortable" id="cities-table">
+        <table class="data sortable" id="powiats-table">
             <thead>
                 <tr>
                     <th data-sort="index">#</th>
-                    <th data-sort="city">Miasto</th>
                     <th data-sort="voivodeship">Województwo</th>
-                    <th data-sort="primary" class="numeric">Pierwotny m²</th>
-                    <th data-sort="secondary" class="numeric">Wtórny m²</th>
-                    <th data-sort="tx" class="numeric">Transakcje</th>
-                    <th data-sort="months" class="numeric">50m² ≈ mies. pensji</th>
+                    <th data-sort="powiat">Powiat</th>
+                    <th data-sort="teryt">TERYT/BDL</th>
+                    <th data-sort="density" class="numeric">Gęstość (os/km²)</th>
+                    <th data-sort="price" class="numeric">Cena m²</th>
                     <th>Okres</th>
+                    <th>Źródła</th>
                     <th>★</th>
                 </tr>
             </thead>
-            <tbody id="cities-tbody">
-            {% for c in cities %}
-                <tr data-city="{{ c.city }}" data-voivodeship="{{ c.voivodeship }}"
-                    data-primary="{{ c.primary or 0 }}" data-secondary="{{ c.secondary or 0 }}"
-                    data-tx="{{ (c.tx_primary or 0) + (c.tx_secondary or 0) }}"
-                    data-months="{{ (c.affordability.months_for_50m2 if c.affordability else 0) }}">  {# guarded #}
+            <tbody id="powiats-tbody">
+            {% for p in powiats %}
+                <tr data-voivodeship="{{ p.voivodeship }}"
+                    data-powiat="{{ p.powiat }}"
+                    data-teryt="{{ p.teryt_code or '' }}"
+                    data-density="{{ p.density or 0 }}"
+                    data-price="{{ p.avg_price_per_m2 or 0 }}">
                     <td class="muted mono row-idx">{{ loop.index }}</td>
-                    <td><div class="city">{{ c.city }}</div></td>
-                    <td class="muted">{{ c.voivodeship }}</td>
-                    <td class="numeric"><strong>{{ c.primary | price }}</strong></td>
-                    <td class="numeric">{{ c.secondary | price }}</td>
-                    <td class="numeric mono">{{ (c.tx_primary + c.tx_secondary) | number }}</td>
-                    <td class="numeric">{{ (c.affordability.months_for_50m2 if c.affordability else None) | months }}</td>
-                    <td><span class="pill">Q{{ c.quarter }} {{ c.year }}</span></td>
+                    <td class="muted">{{ p.voivodeship }}</td>
+                    <td><strong>{{ p.powiat }}</strong></td>
+                    <td class="mono muted">{{ p.teryt_code or '—' }}</td>
+                    <td class="numeric mono">{{ p.density | number }}</td>
+                    <td class="numeric"><strong>{{ p.avg_price_per_m2 | price }}</strong></td>
+                    <td>
+                        {% if p.year %}<span class="pill">Q{{ p.quarter or 4 }} {{ p.year }}</span>{% else %}—{% endif %}
+                    </td>
+                    <td class="muted mono" style="font-size: 0.85em;">{{ p.sources | join(', ') }}</td>
                     <td>
                         <button class="star-btn watch-toggle"
-                                data-city="{{ c.city }}"
-                                data-watched="{{ 1 if c.city in watched else 0 }}"
+                                data-city="{{ p.powiat }}"
+                                data-watched="{{ 1 if p.powiat in watched else 0 }}"
                                 aria-label="Toggle watchlist">
-                            {{ '★' if c.city in watched else '☆' }}
+                            {{ '★' if p.powiat in watched else '☆' }}
                         </button>
                     </td>
                 </tr>
@@ -138,12 +124,8 @@
 
 {% block scripts %}
 <script>
-    window.PRM_DATA = {
-        cities: {{ cities | tojson }}
-    };
     document.addEventListener('DOMContentLoaded', () => {
-        if (window.renderDashboardCharts) window.renderDashboardCharts();
-        if (window.initTableTools) window.initTableTools('#cities-table');
+        if (window.initTableTools) window.initTableTools('#powiats-table');
     });
 </script>
 {% endblock %}

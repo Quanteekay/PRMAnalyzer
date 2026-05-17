@@ -13,6 +13,7 @@ paginates politely with a tiny sleep between pages.
 from __future__ import annotations
 
 import logging
+import os
 import time
 
 import requests
@@ -24,13 +25,42 @@ _PAGE_SIZE = 100
 log = logging.getLogger(__name__)
 
 
-# BDL variable IDs for housing — sourced from BDL's variable catalog
-# (https://bdl.stat.gov.pl). If a variable is unavailable, we log a warning
-# and continue without it (graceful degradation).
-BDL_VARS_HOUSING = {
-    "dwellings_completed": 60271,   # Mieszkania oddane do użytkowania - ogółem
-    "permits": 60559,               # Pozwolenia na budowę - mieszkania
+def _api_headers() -> dict:
+    """Inject BDL API key if BDL_API_KEY env var is set.
+
+    Without a key, BDL caps unauthenticated traffic at 1000 req/12h. With
+    a registered key (free at bdl.stat.gov.pl) the limit jumps to 5000–50000
+    per day depending on tier — needed to discover proper variable IDs.
+    """
+    key = os.environ.get("BDL_API_KEY")
+    return {"X-ClientId": key} if key else {}
+
+
+# BDL variable IDs. The list is intentionally short until we can verify ID
+# meanings against the live catalog (each fetch confirms via measureUnitName).
+# 60559 was originally labelled 'permits' but inspection showed it is actually
+# "ludność na 1 km²" (population density). Keeping it as a useful per-powiat
+# proxy indicator. Future iterations: register a BDL key and pull genuine
+# housing variables (Mieszkania oddane / Pozwolenia na budowę mieszkań).
+BDL_VARS = {
+    "population_density": 60559,    # Ludność na 1 km² (os/km²)
 }
+
+
+def bdl_id_to_teryt(bdl_id: str) -> str | None:
+    """Convert BDL 12-char unit-id to 4-char TERYT code.
+
+    Empirically verified: BDL[2:4] = TERYT województwo (2 digits),
+    BDL[7:9] = TERYT powiat (2 digits, ≥60 for grodzkie).
+    Examples:
+        011212001000 (Bocheński)         → 1201
+        011212161000 (m. Kraków)         → 1261
+        071412865000 (m. st. Warszawa)   → 1465
+        042214361000 (m. Gdańsk)         → 2261
+    """
+    if not bdl_id or len(bdl_id) < 9:
+        return None
+    return bdl_id[2:4] + bdl_id[7:9]
 
 
 def _fetch_voivodeship_map() -> dict[str, str]:
@@ -44,6 +74,7 @@ def _fetch_voivodeship_map() -> dict[str, str]:
         r = requests.get(
             f"{_BDL_BASE}/units",
             params={"level": 2, "page-size": 100, "format": "json"},
+            headers=_api_headers(),
             timeout=_HTTP_TIMEOUT,
         )
         r.raise_for_status()
@@ -84,6 +115,7 @@ def fetch_powiat_catalog() -> list[dict]:
                     "page": page,
                     "format": "json",
                 },
+                headers=_api_headers(),
                 timeout=_HTTP_TIMEOUT,
             )
             r.raise_for_status()
@@ -113,13 +145,13 @@ def fetch_powiat_catalog() -> list[dict]:
     return powiats
 
 
-def fetch_variable_for_powiats(variable_id: int) -> dict[str, dict]:
-    """Fetch one BDL variable for every powiat (unit-level=5).
+def fetch_variable_series(variable_id: int) -> dict[str, list[dict]]:
+    """Fetch a BDL variable for every powiat — full time-series, not just latest.
 
-    Returns: {teryt_code: {'value': float, 'year': int}}.
+    Returns {teryt_code: [{'year': int, 'value': float}, ...]} sorted by year.
     Empty dict if variable is missing or API failed.
     """
-    out: dict[str, dict] = {}
+    out: dict[str, list[dict]] = {}
     page = 0
     while True:
         try:
@@ -131,11 +163,15 @@ def fetch_variable_for_powiats(variable_id: int) -> dict[str, dict]:
                     "page": page,
                     "format": "json",
                 },
+                headers=_api_headers(),
                 timeout=_HTTP_TIMEOUT,
             )
             if r.status_code == 404:
                 log.warning("BDL variable %s not found", variable_id)
                 return {}
+            if r.status_code == 429:
+                log.warning("BDL rate limit hit (var=%s page=%d) — partial data", variable_id, page)
+                break
             r.raise_for_status()
             payload = r.json()
             results = payload.get("results", [])
@@ -148,14 +184,17 @@ def fetch_variable_for_powiats(variable_id: int) -> dict[str, dict]:
             values = entry.get("values", [])
             if not unit_id or not values:
                 continue
-            latest = max(values, key=lambda v: v.get("year", 0))
-            try:
-                out[unit_id] = {
-                    "value": float(latest.get("val", 0)),
-                    "year": int(latest.get("year", 0)),
-                }
-            except (TypeError, ValueError):
-                continue
+            series = []
+            for v in values:
+                try:
+                    series.append({
+                        "year": int(v.get("year", 0)),
+                        "value": float(v.get("val", 0)),
+                    })
+                except (TypeError, ValueError):
+                    continue
+            if series:
+                out[unit_id] = sorted(series, key=lambda x: x["year"])
 
         if len(results) < _PAGE_SIZE:
             break
@@ -165,17 +204,14 @@ def fetch_variable_for_powiats(variable_id: int) -> dict[str, dict]:
     return out
 
 
-def fetch_all_housing_per_powiat() -> dict[str, dict]:
-    """Catalog + housing indicators merged into one dict keyed by teryt_code.
+def fetch_all_indicators_per_powiat() -> dict[str, dict]:
+    """Catalog + BDL indicators (full time-series) merged by teryt_code.
 
     Output shape:
       {teryt_code: {
           'name': str,
           'voivodeship': str,
-          'dwellings_completed': float|None,
-          'dwellings_completed_year': int|None,
-          'permits': float|None,
-          'permits_year': int|None,
+          'series': {<indicator_key>: [{'year', 'value'}, ...]},
       }}
     """
     catalog = fetch_powiat_catalog()
@@ -183,18 +219,14 @@ def fetch_all_housing_per_powiat() -> dict[str, dict]:
         p["teryt_code"]: {
             "name": p["name"],
             "voivodeship": p["voivodeship"],
-            "dwellings_completed": None,
-            "dwellings_completed_year": None,
-            "permits": None,
-            "permits_year": None,
+            "series": {},
         }
         for p in catalog
     }
-    for key, var_id in BDL_VARS_HOUSING.items():
-        data = fetch_variable_for_powiats(var_id)
-        for teryt, payload in data.items():
+    for key, var_id in BDL_VARS.items():
+        data = fetch_variable_series(var_id)
+        for teryt, series in data.items():
             if teryt in merged:
-                merged[teryt][key] = payload["value"]
-                merged[teryt][f"{key}_year"] = payload["year"]
-        log.info("BDL var %s (%s): values for %d powiats", var_id, key, len(data))
+                merged[teryt]["series"][key] = series
+        log.info("BDL var %s (%s): series for %d powiats", var_id, key, len(data))
     return merged

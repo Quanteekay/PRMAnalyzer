@@ -22,8 +22,9 @@ from flask import current_app
 from extensions import db
 from models import DataRefreshLog, RealEstateRecord, BackgroundJob
 from seed_data import all_seed_rows, SeedRow
-from bdl_powiats import fetch_all_housing_per_powiat
+from bdl_powiats import fetch_all_indicators_per_powiat, bdl_id_to_teryt
 from rcn_dump import fetch_rcn_per_powiat
+from rcn_wfs import fetch_rcn_live
 
 log = logging.getLogger(__name__)
 
@@ -153,36 +154,47 @@ def _run_one_source(source_label: str, fetch_fn, triggered_by: str) -> DataRefre
 # ---------------------------------------------------------------------------
 
 def fetch_bdl_powiats() -> list[SeedRow]:
-    """Materialize BDL catalog + housing indicators as SeedRows.
+    """Materialize BDL catalog + indicator time-series as SeedRows.
 
-    BDL doesn't publish a clean PLN/m² figure for powiats, so price stays None.
-    What we gain is coverage: every powiat exists in the DB with a TERYT code,
-    a parent voivodeship and the most recent 'dwellings completed' count as
-    a proxy for transaction volume.
+    BDL doesn't publish PLN/m² for powiats, so price stays None. The
+    `transactions` int field carries the BDL indicator value (currently
+    population density in osoby/km²). We emit one row per (powiat, year)
+    so predictions can fit a trend over the full ~20-year history.
     """
-    catalog = fetch_all_housing_per_powiat()
+    catalog = fetch_all_indicators_per_powiat()
     rows: list[SeedRow] = []
-    for teryt, data in catalog.items():
-        # Prefer 'dwellings_completed' (mieszkania oddane) but BDL var ID
-        # may be missing — fall back to 'permits' (pozwolenia na budowę).
-        transactions = data.get("dwellings_completed") or data.get("permits") or 0
-        year = (
-            data.get("dwellings_completed_year")
-            or data.get("permits_year")
-            or 2024
-        )
-        rows.append(SeedRow(
-            voivodeship=data["voivodeship"],
-            city=data["name"],
-            property_type="apartment",
-            market="mixed",
-            year=year,
-            quarter=4,
-            avg_price_per_m2=None,
-            transactions=int(transactions),
-            powiat=data["name"],
-            teryt_code=teryt,
-        ))
+    for bdl_id, data in catalog.items():
+        # Normalize all powiat rows to 4-char TERYT so RCN-WFS records (also
+        # keyed by TERYT) can join cleanly in the dashboard payload.
+        teryt = bdl_id_to_teryt(bdl_id) or bdl_id
+        series = data["series"].get("population_density") or []
+        if not series:
+            rows.append(SeedRow(
+                voivodeship=data["voivodeship"],
+                city=data["name"],
+                property_type="apartment",
+                market="mixed",
+                year=2024,
+                quarter=4,
+                avg_price_per_m2=None,
+                transactions=0,
+                powiat=data["name"],
+                teryt_code=teryt,
+            ))
+            continue
+        for point in series:
+            rows.append(SeedRow(
+                voivodeship=data["voivodeship"],
+                city=data["name"],
+                property_type="apartment",
+                market="mixed",
+                year=point["year"],
+                quarter=4,
+                avg_price_per_m2=None,
+                transactions=int(round(point["value"])),
+                powiat=data["name"],
+                teryt_code=teryt,
+            ))
     return rows
 
 
@@ -195,12 +207,41 @@ def fetch_rcn_powiats() -> list[SeedRow]:
     return fetch_rcn_per_powiat()
 
 
+def fetch_rcn_wfs() -> list[SeedRow]:
+    """Live RCN transactions from GUGiK WFS, joined with BDL's TERYT mapping.
+
+    The teryt_map ensures RCN-WFS rows (which only carry the bare 4-char TERYT
+    from RCN) inherit the voivodeship and powiat name from our BDL catalog,
+    so upserts merge rather than duplicate.
+    """
+    teryt_map: dict[str, dict] = {}
+    seen = set()
+    for r in RealEstateRecord.query.filter(
+        RealEstateRecord.source == "GUS-BDL",
+        RealEstateRecord.teryt_code.isnot(None),
+    ).all():
+        if r.teryt_code in seen:
+            continue
+        seen.add(r.teryt_code)
+        teryt_map[r.teryt_code] = {
+            "voivodeship": r.voivodeship,
+            "powiat": r.powiat or "",
+        }
+    log.info("RCN-WFS: teryt_map has %d powiat entries", len(teryt_map))
+    return fetch_rcn_live(teryt_map=teryt_map)
+
+
 def refresh_all(triggered_by: str = "scheduler") -> list[DataRefreshLog]:
-    """Refresh data from every configured source. Returns log entries."""
+    """Refresh data from every configured source. Returns log entries.
+
+    BDL runs first because RCN-WFS depends on its TERYT→powiat-name mapping
+    to label transactions correctly.
+    """
     results = [
         _run_one_source("dane.gov.pl", fetch_dane_gov_pl_real_estate, triggered_by),
         _run_one_source("RCN", fetch_rcn, triggered_by),
         _run_one_source("GUS-BDL", fetch_bdl_powiats, triggered_by),
+        _run_one_source("RCN-WFS", fetch_rcn_wfs, triggered_by),
         _run_one_source("RCN-dump", fetch_rcn_powiats, triggered_by),
     ]
     return results

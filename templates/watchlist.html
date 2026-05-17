@@ -6,7 +6,7 @@
     <div class="section-head">
         <div>
             <h2>Moja Watchlist</h2>
-            <div class="sub">Miasta przypięte do szybkiego podglądu.</div>
+            <div class="sub">Powiaty przypięte do szybkiego podglądu.</div>
         </div>
         <span class="freshness">
             <span class="dot"></span>
@@ -14,30 +14,30 @@
         </span>
     </div>
 
-    {% if cities %}
+    {% if powiats %}
     <div class="table-wrap">
         <table class="data">
             <thead>
                 <tr>
-                    <th>Miasto</th>
-                    <th class="numeric">Pierwotny</th>
-                    <th class="numeric">Wtórny</th>
-                    <th class="numeric">Wskaźnik 50m²</th>
+                    <th>Powiat</th>
+                    <th>TERYT/BDL</th>
+                    <th class="numeric">Gęstość (os/km²)</th>
+                    <th class="numeric">Cena m²</th>
                     <th></th>
                 </tr>
             </thead>
             <tbody>
-            {% for c in cities %}
+            {% for p in powiats %}
                 <tr>
                     <td>
-                        <div class="city">{{ c.city }}</div>
-                        <div class="muted" style="font-size:.78rem;">{{ c.voivodeship }}</div>
+                        <div class="city">{{ p.powiat }}</div>
+                        <div class="muted" style="font-size:.78rem;">{{ p.voivodeship }}</div>
                     </td>
-                    <td class="numeric"><strong>{{ c.primary | price }}</strong></td>
-                    <td class="numeric">{{ c.secondary | price }}</td>
-                    <td class="numeric">{{ (c.affordability.months_for_50m2 if c.affordability else None) | months }}</td>
+                    <td class="mono muted">{{ p.teryt_code or '—' }}</td>
+                    <td class="numeric mono">{{ p.density | number }}</td>
+                    <td class="numeric"><strong>{{ p.avg_price_per_m2 | price }}</strong></td>
                     <td>
-                        <button class="btn btn-ghost watch-toggle" data-city="{{ c.city }}" data-watched="1">★ usuń</button>
+                        <button class="btn btn-ghost watch-toggle" data-city="{{ p.powiat }}" data-watched="1">★ usuń</button>
                     </td>
                 </tr>
             {% endfor %}
@@ -47,7 +47,7 @@
     {% else %}
     <div class="card" style="text-align:center; padding: 56px 24px;">
         <p class="muted" style="margin-bottom: 18px;">Twoja watchlist jest pusta.</p>
-        <a href="{{ url_for('main.dashboard') }}" class="btn btn-primary">Wybierz miasta z dashboardu</a>
+        <a href="{{ url_for('main.dashboard') }}" class="btn btn-primary">Wybierz powiaty z dashboardu</a>
     </div>
     {% endif %}
 </section>

@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Predykcje cen — PRMAnalyzer{% endblock %}
+{% block title %}Predykcje per powiat — PRMAnalyzer{% endblock %}
 
 {% block content %}
 <section class="section" style="margin-top: 12px;">
     <div class="section-head">
         <div>
-            <h2>Predykcje cen</h2>
-            <div class="sub">Prognoza średniej ceny m² na 3 lata w przód na podstawie regresji liniowej.</div>
+            <h2>Predykcje per powiat</h2>
+            <div class="sub">Regresja liniowa gęstości zaludnienia (BDL, ~20 lat historii) z prognozą 5 lat w przód.</div>
         </div>
         <span class="freshness">
             <span class="dot"></span>
@@ -16,21 +16,26 @@
 
     <div class="card" style="margin-bottom: 22px;">
         <form method="get" class="row" style="gap: 12px;">
-            <label class="muted">Region:</label>
-            <select name="voivodeship" class="form-input" style="width: 280px;" onchange="this.form.submit()">
-                <option value="">Polska — średnia krajowa</option>
-                {% for v in all_voivodeships %}
-                    <option value="{{ v }}" {% if v == selected_voivodeship %}selected{% endif %}>{{ v }}</option>
+            <label class="muted">Powiat:</label>
+            <select name="teryt" class="form-input" style="width: 360px;" onchange="this.form.submit()">
+                <option value="">— wybierz powiat —</option>
+                {% for p in powiats %}
+                    {% if p.teryt_code %}
+                    <option value="{{ p.teryt_code }}" {% if p.teryt_code == selected_teryt %}selected{% endif %}>
+                        {{ p.powiat }} ({{ p.voivodeship }})
+                    </option>
+                    {% endif %}
                 {% endfor %}
             </select>
         </form>
     </div>
 
+    {% if result.historical %}
     <div class="kpi-grid">
         <div class="kpi" data-accent="1">
             <div class="kpi-label">Trend roczny</div>
-            <div class="kpi-value">{{ result.slope | price }}</div>
-            <div class="kpi-meta">wzrost ceny m² rok do roku</div>
+            <div class="kpi-value">{{ '%+.1f' | format(result.slope) }}</div>
+            <div class="kpi-meta">os/km² rok do roku</div>
         </div>
         <div class="kpi" data-accent="2">
             <div class="kpi-label">R²</div>
@@ -38,15 +43,15 @@
             <div class="kpi-meta">dopasowanie modelu (0–1)</div>
         </div>
         <div class="kpi" data-accent="3">
-            <div class="kpi-label">Region</div>
-            <div class="kpi-value" style="font-size: 1.4rem;">{{ result.voivodeship }}</div>
-            <div class="kpi-meta">podstawa prognozy</div>
+            <div class="kpi-label">Powiat</div>
+            <div class="kpi-value" style="font-size: 1.3rem;">{{ selected_name or '—' }}</div>
+            <div class="kpi-meta">{{ result.teryt_code or '' }}</div>
         </div>
     </div>
 
     <div class="card chart-card" style="margin-top: 22px;">
         <div class="card-title">
-            <h3>Historia + prognoza 3 lata</h3>
+            <h3>Historia + prognoza 5 lat</h3>
             <span class="sub">linia przerywana = predykcja, obszar = przedział ufności 95%</span>
         </div>
         <canvas id="chart-forecast" style="height: 380px !important;"></canvas>
@@ -58,7 +63,7 @@
             <thead>
                 <tr>
                     <th>Rok</th>
-                    <th class="numeric">Prognoza ceny m²</th>
+                    <th class="numeric">Prognoza (os/km²)</th>
                     <th class="numeric">Dolne 95%</th>
                     <th class="numeric">Górne 95%</th>
                 </tr>
@@ -67,9 +72,9 @@
                 {% for row in result.forecast %}
                 <tr>
                     <td><span class="pill">{{ row.year }}</span></td>
-                    <td class="numeric"><strong>{{ row.price | price }}</strong></td>
-                    <td class="numeric muted">{{ row.low | price }}</td>
-                    <td class="numeric muted">{{ row.high | price }}</td>
+                    <td class="numeric"><strong>{{ row.value | number }}</strong></td>
+                    <td class="numeric muted">{{ row.low | number }}</td>
+                    <td class="numeric muted">{{ row.high | number }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -81,18 +86,23 @@
         <div class="row" style="gap: 12px;">
             <span style="font-size: 1.4rem;">⚠</span>
             <div>
-                <strong>Uwaga:</strong> prognoza opiera się na prostym modelu liniowym z danych historycznych.
-                Nie uwzględnia czynników makroekonomicznych (stopy procentowe, inflacja, sytuacja geopolityczna).
-                Wynik traktuj jako referencyjny, nie jako poradę inwestycyjną.
+                <strong>Uwaga:</strong> prognoza opiera się na prostym modelu liniowym gęstości zaludnienia.
+                Trend demograficzny jest długoterminowy i powolny — model nie wychwyci nagłych zmian
+                (migracje, polityka mieszkaniowa). Wynik traktuj jako referencyjny.
             </div>
         </div>
     </div>
+    {% else %}
+    <div class="card" style="text-align: center; padding: 48px 24px;">
+        <p class="muted">Wybierz powiat z listy powyżej, aby zobaczyć prognozę gęstości.</p>
+    </div>
+    {% endif %}
 </section>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    window.RCN_FORECAST = {{ result | tojson }};
+    window.PRM_FORECAST = {{ result | tojson }};
     document.addEventListener('DOMContentLoaded', () => {
         if (window.renderForecastChart) window.renderForecastChart();
     });

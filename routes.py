@@ -25,7 +25,7 @@ from data_fetcher import refresh_all, queue_async_refresh
 from external_apis import (
     nbp_rates, nbp_gold_price, gus_wages_by_voivodeship, affordability_index,
 )
-from predictions import forecast_price_series
+from predictions import forecast_density
 
 main_bp = Blueprint("main", __name__)
 
@@ -143,9 +143,9 @@ def _voivodeship_latest_price() -> dict[str, float]:
 
 
 def _powiats_payload() -> list[dict]:
-    """One row per (voivodeship, powiat) with merged best-effort numbers
-    across all sources: latest avg PLN/m² from RCN-dump, transaction volume
-    proxy from BDL (dwellings completed)."""
+    """Latest snapshot per (voivodeship, powiat): newest non-null avg PLN/m²
+    (from RCN seed for big-city powiats) and newest density value (from BDL).
+    """
     rows = (
         RealEstateRecord.query.filter(RealEstateRecord.powiat.isnot(None))
         .order_by(RealEstateRecord.year.desc(), RealEstateRecord.quarter.desc())
@@ -159,7 +159,7 @@ def _powiats_payload() -> list[dict]:
             "powiat": r.powiat,
             "teryt_code": r.teryt_code,
             "avg_price_per_m2": None,
-            "transactions": None,
+            "density": None,
             "year": None,
             "quarter": None,
             "sources": set(),
@@ -167,13 +167,12 @@ def _powiats_payload() -> list[dict]:
         bucket["sources"].add(r.source)
         if not bucket["teryt_code"] and r.teryt_code:
             bucket["teryt_code"] = r.teryt_code
-        # First non-null price wins (records are ordered newest-first)
         if bucket["avg_price_per_m2"] is None and r.avg_price_per_m2:
             bucket["avg_price_per_m2"] = r.avg_price_per_m2
             bucket["year"] = r.year
             bucket["quarter"] = r.quarter
-        if bucket["transactions"] is None and r.transactions:
-            bucket["transactions"] = r.transactions
+        if bucket["density"] is None and r.transactions:
+            bucket["density"] = r.transactions
             if not bucket["year"]:
                 bucket["year"] = r.year
                 bucket["quarter"] = r.quarter
@@ -184,6 +183,22 @@ def _powiats_payload() -> list[dict]:
         out.append(b)
     out.sort(key=lambda x: (x["voivodeship"], x["powiat"]))
     return out
+
+
+def _powiats_kpis(payload: list[dict]) -> dict:
+    """Aggregate KPIs across all powiats for the dashboard hero row."""
+    if not payload:
+        return {"total": 0, "with_price": 0, "avg_density": 0, "max_density": 0, "min_density": 0, "avg_price": 0}
+    densities = [p["density"] for p in payload if p["density"]]
+    prices = [p["avg_price_per_m2"] for p in payload if p["avg_price_per_m2"]]
+    return {
+        "total": len(payload),
+        "with_price": len(prices),
+        "avg_density": round(sum(densities) / len(densities), 0) if densities else 0,
+        "max_density": max(densities) if densities else 0,
+        "min_density": min(densities) if densities else 0,
+        "avg_price": round(sum(prices) / len(prices), 0) if prices else 0,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -200,18 +215,16 @@ def index():
 @main_bp.route("/dashboard")
 @login_required
 def dashboard():
-    kpis = _kpis()
-    cities = _cities_payload(include_affordability=True)
-    latest = get_latest_fetched_at()
-    watched = (
-        {w.city for w in current_user.watched_cities}
-        if current_user.is_authenticated else set()
-    )
+    powiats = _powiats_payload()
+    kpis = _powiats_kpis(powiats)
+    voivodeships = sorted({p["voivodeship"] for p in powiats})
+    watched = {w.city for w in current_user.watched_cities}
     return render_template(
         "dashboard.html",
+        powiats=powiats,
         kpis=kpis,
-        cities=cities,
-        latest_fetched=latest,
+        voivodeships=voivodeships,
+        latest_fetched=get_latest_fetched_at(),
         watched=watched,
     )
 
@@ -230,75 +243,82 @@ def analytics():
     )
 
 
+def _normalize_powiat_name(name: str) -> str:
+    """Match key for joining BDL powiat names with GeoJSON 'nazwa' field.
+
+    BDL examples → GeoJSON examples:
+      'Powiat bocheński'    → 'powiat bocheński'
+      'Powiat m. Kraków'    → 'powiat Kraków'
+    Strip the leading 'powiat' and any 'm.'/'m.st.' marker, lowercase the rest.
+    """
+    s = name.lower().strip()
+    for prefix in ("powiat ",):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+            break
+    for marker in ("m. ", "m.st. ", "m.st.", "m."):
+        if s.startswith(marker):
+            s = s[len(marker):]
+            break
+    return s.strip()
+
+
 @main_bp.route("/map")
 @login_required
 def map_view():
-    prices = _voivodeship_latest_price()
-    wages = gus_wages_by_voivodeship()
-    latest = get_latest_fetched_at()
+    payload = _powiats_payload()
+    # Map by normalized name so the JS layer can join with the GeoJSON polygons.
+    by_name: dict[str, dict] = {}
+    for p in payload:
+        key = _normalize_powiat_name(p["powiat"])
+        if key and key not in by_name:
+            by_name[key] = {
+                "powiat": p["powiat"],
+                "voivodeship": p["voivodeship"],
+                "teryt_code": p["teryt_code"],
+                "density": p["density"],
+                "avg_price_per_m2": p["avg_price_per_m2"],
+            }
+    voivodeships = sorted({p["voivodeship"] for p in payload})
     return render_template(
         "map.html",
-        prices=prices,
-        wages=wages,
-        latest_fetched=latest,
+        powiats_by_name=by_name,
+        voivodeships=voivodeships,
+        latest_fetched=get_latest_fetched_at(),
     )
 
 
 @main_bp.route("/compare")
 @login_required
 def compare():
-    cities_param = request.args.getlist("city")
-    selected = []
-    if cities_param:
-        rows = _city_records_latest()
-        by_city = defaultdict(lambda: {"primary": None, "secondary": None})
-        for r in rows:
-            by_city[r.city][r.market] = r
-        wages = gus_wages_by_voivodeship()
-        for city in cities_param:
-            by_market = by_city.get(city)
-            if not by_market:
-                continue
-            primary = by_market.get("primary")
-            secondary = by_market.get("secondary")
-            any_row = primary or secondary
-            if not any_row:
-                continue
-            avg_price = None
-            prices = [p.avg_price_per_m2 for p in (primary, secondary) if p]
-            if prices:
-                avg_price = sum(prices) / len(prices)
-            selected.append({
-                "city": city,
-                "voivodeship": any_row.voivodeship,
-                "primary": primary.avg_price_per_m2 if primary else None,
-                "secondary": secondary.avg_price_per_m2 if secondary else None,
-                "tx_total": (primary.transactions if primary else 0) + (secondary.transactions if secondary else 0),
-                "avg_price": avg_price,
-                "wage": wages.get(any_row.voivodeship),
-                "affordability": affordability_index(avg_price, any_row.voivodeship) if avg_price else None,
-            })
-    all_cities = sorted({r.city for r in _city_records_latest() if r.city})
-    latest = get_latest_fetched_at()
+    selected_names = request.args.getlist("powiat")[:5]  # hard cap at 5
+    payload = _powiats_payload()
+    by_name = {p["powiat"]: p for p in payload}
+    selected = [by_name[n] for n in selected_names if n in by_name]
     return render_template(
         "compare.html",
-        all_cities=all_cities,
+        all_powiats=payload,
         selected=selected,
-        latest_fetched=latest,
+        latest_fetched=get_latest_fetched_at(),
     )
 
 
 @main_bp.route("/predictions")
 @login_required
 def predictions_view():
-    voiv = request.args.get("voivodeship", "")
-    result = forecast_price_series(voiv or None, forecast_years=3)
-    all_voiv = sorted({r.voivodeship for r in db.session.query(RealEstateRecord).filter(RealEstateRecord.market == "mixed").distinct()})
+    teryt = request.args.get("teryt", "")
+    result = forecast_density(teryt_code=teryt or None, forecast_years=5)
+    powiats = _powiats_payload()
+    selected_name = None
+    if teryt:
+        match = next((p for p in powiats if p["teryt_code"] == teryt), None)
+        selected_name = match["powiat"] if match else None
     return render_template(
         "predictions.html",
         result=result,
-        all_voivodeships=all_voiv,
-        selected_voivodeship=voiv,
+        powiats=powiats,
+        selected_teryt=teryt,
+        selected_name=selected_name,
         latest_fetched=get_latest_fetched_at(),
     )
 
@@ -317,19 +337,6 @@ def finance_view():
     )
 
 
-@main_bp.route("/powiaty")
-@login_required
-def powiaty_view():
-    powiats = _powiats_payload()
-    voivodeships = sorted({p["voivodeship"] for p in powiats})
-    return render_template(
-        "powiaty.html",
-        powiats=powiats,
-        voivodeships=voivodeships,
-        latest_fetched=get_latest_fetched_at(),
-    )
-
-
 @main_bp.route("/api/powiats")
 @login_required
 def api_powiats():
@@ -342,11 +349,11 @@ def api_powiats():
 @main_bp.route("/watchlist")
 @login_required
 def watchlist_view():
-    watched_cities = [w.city for w in current_user.watched_cities]
-    cities = [c for c in _cities_payload(include_affordability=True) if c["city"] in watched_cities]
+    watched_names = {w.city for w in current_user.watched_cities}
+    powiats = [p for p in _powiats_payload() if p["powiat"] in watched_names]
     return render_template(
         "watchlist.html",
-        cities=cities,
+        powiats=powiats,
         latest_fetched=get_latest_fetched_at(),
     )
 
@@ -448,55 +455,48 @@ def admin_revoke_api_key(key_id):
 # CSV / XLSX export
 # ---------------------------------------------------------------------------
 
-@main_bp.route("/export/cities.csv")
+@main_bp.route("/export/powiats.csv")
 @login_required
-def export_cities_csv():
-    cities = _cities_payload(include_affordability=True)
+def export_powiats_csv():
+    powiats = _powiats_payload()
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow([
-        "city", "voivodeship", "primary_zl_per_m2", "secondary_zl_per_m2",
-        "tx_primary", "tx_secondary", "year", "quarter",
-        "wage_in_voivodeship", "months_for_50m2",
+        "voivodeship", "powiat", "teryt_code",
+        "density_persons_per_km2", "avg_price_per_m2", "year", "quarter", "sources",
     ])
-    for c in cities:
-        aff = c.get("affordability") or {}
+    for p in powiats:
         writer.writerow([
-            c["city"], c["voivodeship"],
-            c.get("primary") or "", c.get("secondary") or "",
-            c.get("tx_primary") or 0, c.get("tx_secondary") or 0,
-            c.get("year") or "", c.get("quarter") or "",
-            aff.get("wage") or "", aff.get("months_for_50m2") or "",
+            p["voivodeship"], p["powiat"], p["teryt_code"] or "",
+            p["density"] or "",
+            p["avg_price_per_m2"] or "",
+            p["year"] or "", p["quarter"] or "",
+            "|".join(p["sources"]),
         ])
     return Response(
         buf.getvalue(),
         mimetype="text/csv",
-        headers={
-            "Content-Disposition": 'attachment; filename="cities.csv"',
-        },
+        headers={"Content-Disposition": 'attachment; filename="powiats.csv"'},
     )
 
 
-@main_bp.route("/export/cities.xlsx")
+@main_bp.route("/export/powiats.xlsx")
 @login_required
-def export_cities_xlsx():
-    cities = _cities_payload(include_affordability=True)
+def export_powiats_xlsx():
+    powiats = _powiats_payload()
     wb = Workbook()
     ws = wb.active
-    ws.title = "Cities"
+    ws.title = "Powiaty"
     ws.append([
-        "Miasto", "Województwo", "Pierwotny zł/m²", "Wtórny zł/m²",
-        "Tx pierwotny", "Tx wtórny", "Rok", "Kwartał",
-        "Wynagrodzenie woj.", "Miesięcy na 50 m²",
+        "Województwo", "Powiat", "TERYT/BDL",
+        "Gęstość (os/km²)", "Cena zł/m²", "Rok", "Kwartał", "Źródła",
     ])
-    for c in cities:
-        aff = c.get("affordability") or {}
+    for p in powiats:
         ws.append([
-            c["city"], c["voivodeship"],
-            c.get("primary"), c.get("secondary"),
-            c.get("tx_primary") or 0, c.get("tx_secondary") or 0,
-            c.get("year"), c.get("quarter"),
-            aff.get("wage"), aff.get("months_for_50m2"),
+            p["voivodeship"], p["powiat"], p["teryt_code"] or "",
+            p["density"], p["avg_price_per_m2"],
+            p["year"], p["quarter"],
+            ", ".join(p["sources"]),
         ])
     buf = io.BytesIO()
     wb.save(buf)
@@ -504,7 +504,7 @@ def export_cities_xlsx():
     return Response(
         buf.read(),
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="cities.xlsx"'},
+        headers={"Content-Disposition": 'attachment; filename="powiats.xlsx"'},
     )
 
 
@@ -543,31 +543,40 @@ def api_voiv_prices():
 @login_required
 @limiter.limit("60 per minute")
 def api_search():
-    """Autocomplete for cities + voivodeships."""
+    """Autocomplete for powiats + voivodeships."""
     q = (request.args.get("q") or "").strip().lower()
     if not q:
         return jsonify({"results": []})
     rows = (
-        db.session.query(RealEstateRecord.city, RealEstateRecord.voivodeship)
+        db.session.query(
+            RealEstateRecord.powiat,
+            RealEstateRecord.voivodeship,
+            RealEstateRecord.teryt_code,
+        )
         .filter(
             or_(
-                func.lower(RealEstateRecord.city).contains(q),
+                func.lower(RealEstateRecord.powiat).contains(q),
                 func.lower(RealEstateRecord.voivodeship).contains(q),
             )
         )
-        .filter(RealEstateRecord.city.isnot(None))
+        .filter(RealEstateRecord.powiat.isnot(None))
         .distinct()
         .limit(10)
         .all()
     )
-    return jsonify({"results": [{"city": r[0], "voivodeship": r[1]} for r in rows]})
+    return jsonify({
+        "results": [
+            {"powiat": r[0], "voivodeship": r[1], "teryt_code": r[2] or ""}
+            for r in rows
+        ]
+    })
 
 
 @main_bp.route("/api/predict")
 @login_required
 def api_predict():
-    voiv = request.args.get("voivodeship", "") or None
-    return jsonify(forecast_price_series(voiv, forecast_years=3))
+    teryt = request.args.get("teryt", "") or None
+    return jsonify(forecast_density(teryt_code=teryt, forecast_years=5))
 
 
 @main_bp.route("/api/jobs/<int:job_id>")

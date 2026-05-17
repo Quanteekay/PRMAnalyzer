@@ -61,7 +61,28 @@ SEED_RECORDS_2024_Q4: list[SeedRow] = [
     SeedRow("lubuskie", "Zielona Góra", "apartment", "secondary", 2024, 4, 7340, 390),
 ]
 
-# Historical series (2020-2024) for time-trend chart - per voivodeship average
+# Ekstrapolacja 2024 Q4 → 2025 Q4 dla 16 stolic województw.
+# YoY cen mieszkań w PL 2024→2025 oscyluje wokół +5-10%; bierzemy 7% jako
+# konserwatywną wartość. Transakcje +3% (lekkie odbicie wolumenu).
+_PRICE_GROWTH_2025 = 1.07
+_TX_GROWTH_2025 = 1.03
+
+SEED_RECORDS_2025_Q4: list[SeedRow] = [
+    SeedRow(
+        voivodeship=r.voivodeship,
+        city=r.city,
+        property_type=r.property_type,
+        market=r.market,
+        year=2025,
+        quarter=4,
+        avg_price_per_m2=round(r.avg_price_per_m2 * _PRICE_GROWTH_2025, 0),
+        transactions=int(r.transactions * _TX_GROWTH_2025),
+    )
+    for r in SEED_RECORDS_2024_Q4
+]
+
+
+# Historical series (2020-2025) for time-trend chart - per voivodeship average
 HISTORICAL_TREND: list[SeedRow] = []
 _base_2020 = {
     "mazowieckie": 9800,
@@ -81,8 +102,9 @@ _base_2020 = {
     "świętokrzyskie": 5200,
     "lubuskie": 5100,
 }
-# Growth coefficients per year (cumulative): 2020->2024 ~ +75% nationwide on average
-_growth = {2020: 1.00, 2021: 1.14, 2022: 1.32, 2023: 1.52, 2024: 1.75}
+# Growth coefficients per year (cumulative).
+# 2020→2024 ~ +75%; +7% extrapolated for 2025 → 1.87×.
+_growth = {2020: 1.00, 2021: 1.14, 2022: 1.32, 2023: 1.52, 2024: 1.75, 2025: 1.87}
 
 for voiv, base in _base_2020.items():
     for year, factor in _growth.items():
@@ -120,5 +142,6 @@ def _enrich_powiat(row: SeedRow) -> SeedRow:
 
 def all_seed_rows() -> list[SeedRow]:
     rows = [_enrich_powiat(r) for r in SEED_RECORDS_2024_Q4]
+    rows.extend(_enrich_powiat(r) for r in SEED_RECORDS_2025_Q4)
     rows.extend(HISTORICAL_TREND)
     return rows

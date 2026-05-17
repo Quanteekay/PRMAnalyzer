@@ -21,7 +21,7 @@ from models import (
 from external_apis import (
     nbp_rates, nbp_gold_price, gus_wages_by_voivodeship, affordability_index,
 )
-from predictions import forecast_price_series
+from predictions import forecast_density
 
 api_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
@@ -198,16 +198,16 @@ class Affordability(Resource):
 @ns_pred.route("/forecast")
 class Forecast(Resource):
     @ns_pred.doc(params={
-        "voivodeship": "(opcjonalne) prognoza dla konkretnego województwa",
+        "teryt": "(opcjonalne) BDL/TERYT kod powiatu do prognozy gęstości",
         "years": "Liczba lat prognozy (1-10)",
     })
     @limiter.limit("30 per minute")
     @require_api_key
     def get(self):
-        voiv = request.args.get("voivodeship", "") or None
+        teryt = request.args.get("teryt", "") or None
         try:
-            years = int(request.args.get("years", "3"))
+            years = int(request.args.get("years", "5"))
         except ValueError:
-            years = 3
+            years = 5
         years = max(1, min(years, 10))
-        return forecast_price_series(voiv, forecast_years=years)
+        return forecast_density(teryt_code=teryt, forecast_years=years)

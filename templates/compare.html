@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Porównywarka miast — PRMAnalyzer{% endblock %}
+{% block title %}Porównywarka powiatów — PRMAnalyzer{% endblock %}
 
 {% block content %}
 <section class="section" style="margin-top: 12px;">
     <div class="section-head">
         <div>
-            <h2>Porównywarka miast</h2>
-            <div class="sub">Wybierz 2–5 miast i porównaj ceny, transakcje i wskaźniki dostępności.</div>
+            <h2>Porównywarka powiatów</h2>
+            <div class="sub">Wybierz 2–5 powiatów. Pokazujemy gęstość zaludnienia (BDL) i cenę m² (jeśli dostępna).</div>
         </div>
         <span class="freshness">
             <span class="dot"></span>
@@ -15,20 +15,24 @@
     </div>
 
     <div class="card" style="margin-bottom: 22px;">
-        <h3 style="margin-bottom: 14px;">Wybierz miasta</h3>
+        <h3 style="margin-bottom: 14px;">Wybierz powiaty</h3>
+        <input type="search" id="compare-filter" class="form-input" placeholder="🔍 Filtruj powiat lub województwo…" style="margin-bottom: 14px;">
         <form method="get" id="compare-form">
-            <div class="city-grid">
-                {% for city in all_cities %}
-                <label class="city-check">
-                    <input type="checkbox" name="city" value="{{ city }}"
-                           {% if city in (selected | map(attribute='city') | list) %}checked{% endif %}>
-                    <span>{{ city }}</span>
+            <div class="city-grid" id="compare-grid">
+                {% for p in all_powiats %}
+                <label class="city-check"
+                       data-powiat="{{ p.powiat | lower }}"
+                       data-voivodeship="{{ p.voivodeship | lower }}">
+                    <input type="checkbox" name="powiat" value="{{ p.powiat }}"
+                           {% if p.powiat in (selected | map(attribute='powiat') | list) %}checked{% endif %}>
+                    <span>{{ p.powiat }}<br><small class="muted">{{ p.voivodeship }}</small></span>
                 </label>
                 {% endfor %}
             </div>
-            <div class="row" style="margin-top: 16px;">
+            <div class="row" style="margin-top: 16px; gap: 10px;">
                 <button type="submit" class="btn btn-primary">Porównaj</button>
                 <a href="{{ url_for('main.compare') }}" class="btn btn-ghost">Wyczyść</a>
+                <span class="muted" id="compare-count">0 zaznaczonych (max 5)</span>
             </div>
         </form>
     </div>
@@ -36,70 +40,92 @@
     {% if selected %}
     <div class="card chart-card" style="margin-bottom: 22px;">
         <div class="card-title">
-            <h3>Porównanie cen m²</h3>
-            <span class="sub">pierwotny vs wtórny</span>
+            <h3>Porównanie gęstości zaludnienia</h3>
+            <span class="sub">os/km² — proxy aktywności rynku</span>
         </div>
         <canvas id="chart-compare"></canvas>
     </div>
 
     <div class="compare-grid">
-        {% for c in selected %}
+        {% for p in selected %}
         <div class="card compare-card">
             <div class="row between">
-                <h3 style="margin: 0;">{{ c.city }}</h3>
-                <span class="pill">{{ c.voivodeship }}</span>
+                <h3 style="margin: 0;">{{ p.powiat }}</h3>
+                <span class="pill">{{ p.voivodeship }}</span>
             </div>
             <div class="kpi-row">
                 <div class="kpi-mini">
-                    <div class="kpi-label">Pierwotny</div>
-                    <div class="kpi-mini-val">{{ c.primary | price }}</div>
+                    <div class="kpi-label">Gęstość</div>
+                    <div class="kpi-mini-val">{{ p.density | number }} <small>os/km²</small></div>
                 </div>
                 <div class="kpi-mini">
-                    <div class="kpi-label">Wtórny</div>
-                    <div class="kpi-mini-val">{{ c.secondary | price }}</div>
+                    <div class="kpi-label">Cena m²</div>
+                    <div class="kpi-mini-val">{{ p.avg_price_per_m2 | price }}</div>
                 </div>
             </div>
-            <div class="kpi-row">
-                <div class="kpi-mini">
-                    <div class="kpi-label">Transakcje</div>
-                    <div class="kpi-mini-val">{{ c.tx_total | number }}</div>
-                </div>
-                <div class="kpi-mini">
-                    <div class="kpi-label">Wynagr. woj.</div>
-                    <div class="kpi-mini-val">{{ c.wage | price }}</div>
-                </div>
-            </div>
-            {% if c.affordability %}
             <div style="border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px;">
-                <div class="kpi-label" style="margin-bottom: 8px;">Wskaźnik dostępności</div>
                 <div class="row between">
-                    <span class="muted">1 m² to</span>
-                    <strong>{{ c.affordability.months_for_1m2 | months }}</strong>
+                    <span class="muted">TERYT/BDL</span>
+                    <strong class="mono">{{ p.teryt_code or '—' }}</strong>
                 </div>
                 <div class="row between">
-                    <span class="muted">50 m² to</span>
-                    <strong>{{ c.affordability.months_for_50m2 | months }}</strong>
+                    <span class="muted">Okres</span>
+                    <strong>{% if p.year %}Q{{ p.quarter or 4 }} {{ p.year }}{% else %}—{% endif %}</strong>
+                </div>
+                <div class="row between">
+                    <span class="muted">Źródła</span>
+                    <strong class="mono" style="font-size: 0.85em;">{{ p.sources | join(', ') }}</strong>
                 </div>
             </div>
-            {% endif %}
         </div>
         {% endfor %}
     </div>
     {% else %}
     <div class="card" style="text-align: center; padding: 48px 24px;">
-        <p class="muted">Zaznacz miasta powyżej, aby zobaczyć porównanie.</p>
+        <p class="muted">Zaznacz powiaty powyżej, aby zobaczyć porównanie.</p>
     </div>
     {% endif %}
 </section>
 {% endblock %}
 
 {% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const filter = document.getElementById('compare-filter');
+        const grid = document.getElementById('compare-grid');
+        const counter = document.getElementById('compare-count');
+        const items = grid ? Array.from(grid.querySelectorAll('.city-check')) : [];
+
+        function applyFilter() {
+            const q = (filter.value || '').toLowerCase().trim();
+            items.forEach(el => {
+                if (!q) { el.style.display = ''; return; }
+                const p = el.dataset.powiat || '';
+                const v = el.dataset.voivodeship || '';
+                el.style.display = (p.includes(q) || v.includes(q)) ? '' : 'none';
+            });
+        }
+        function updateCounter() {
+            const checked = grid.querySelectorAll('input[type="checkbox"]:checked').length;
+            counter.textContent = `${checked} zaznaczonych (max 5)`;
+            // Disable further checkboxes once 5 selected
+            const allBoxes = grid.querySelectorAll('input[type="checkbox"]');
+            allBoxes.forEach(cb => { if (!cb.checked) cb.disabled = checked >= 5; });
+        }
+        if (filter) filter.addEventListener('input', applyFilter);
+        if (grid) {
+            grid.addEventListener('change', updateCounter);
+            updateCounter();
+        }
+
+        if (window.PRM_COMPARE && window.renderCompareChart) {
+            window.renderCompareChart();
+        }
+    });
+</script>
 {% if selected %}
 <script>
-    window.RCN_COMPARE = {{ selected | tojson }};
-    document.addEventListener('DOMContentLoaded', () => {
-        if (window.renderCompareChart) window.renderCompareChart();
-    });
+    window.PRM_COMPARE = {{ selected | tojson }};
 </script>
 {% endif %}
 {% endblock %}
