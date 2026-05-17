@@ -386,6 +386,40 @@ window.renderAnalyticsCharts = function () {
     }
 };
 
+/* ----------------------- Finance sparklines ----------------------- */
+window.renderFinanceSparklines = function () {
+    document.querySelectorAll('canvas.fx-spark').forEach((canvas) => {
+        let series;
+        try {
+            series = JSON.parse(canvas.dataset.spark || '[]');
+        } catch { return; }
+        if (!series.length) return;
+        const color = canvas.dataset.color || '#7c5cff';
+        new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: series.map((p) => p.date),
+                datasets: [{
+                    data: series.map((p) => p.rate),
+                    borderColor: color,
+                    backgroundColor: color + '22',
+                    borderWidth: 1.6,
+                    pointRadius: 0,
+                    tension: 0.25,
+                    fill: true,
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                scales: { x: { display: false }, y: { display: false } },
+            },
+        });
+    });
+};
+
+
 /* ----------------------- Compare chart ----------------------- */
 window.renderCompareChart = function () {
     const items = window.PRM_COMPARE || [];

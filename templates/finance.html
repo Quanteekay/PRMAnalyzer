@@ -1,39 +1,86 @@
 {% extends "base.html" %}
 {% block title %}Finanse — PRMAnalyzer{% endblock %}
 
+{% block head_extra %}
+<style>
+    .fx-card { padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card-bg); display: flex; flex-direction: column; gap: 8px; }
+    .fx-head { display: flex; justify-content: space-between; align-items: baseline; }
+    .fx-code { font-size: 0.85rem; color: var(--text-2); letter-spacing: 0.04em; }
+    .fx-rate { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 600; color: var(--text-0); }
+    .fx-delta { font-family: var(--font-mono); font-size: .85rem; font-weight: 600; padding: 2px 8px; border-radius: 6px; }
+    .fx-delta.up   { color: #0ad48b; background: rgba(10,212,139,0.12); }
+    .fx-delta.down { color: #ff5e6d; background: rgba(255,94,109,0.12); }
+    .fx-delta.flat { color: var(--text-2); background: var(--surface-2); }
+    .fx-meta { font-size: .78rem; color: var(--text-2); }
+    .fx-spark { height: 44px; }
+    .fx-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+</style>
+{% endblock %}
+
 {% block content %}
 <section class="section" style="margin-top: 12px;">
     <div class="section-head">
         <div>
             <h2>Finanse</h2>
-            <div class="sub">Kursy walut NBP, cena złota i kalkulator opłacalności inwestycji w mieszkanie.</div>
+            <div class="sub">
+                Kursy walut NBP (tabela A) i cena złota — live z api.nbp.pl. Sparkline pokazuje trend z ostatnich 30 dni roboczych.
+            </div>
         </div>
         <span class="freshness">
             <span class="dot"></span>
-            Dane z: <strong>{{ latest_fetched | datetime }}</strong>
+            Aktualne dane NBP: <strong>{{ rates[0].date if rates else '—' }}</strong>
         </span>
     </div>
 
-    <div class="kpi-grid">
+    <div class="fx-grid">
         {% for r in rates %}
-        <div class="kpi" data-accent="{{ loop.index0 % 3 + 1 }}">
-            <div class="kpi-label">{{ r.code }} → PLN</div>
-            <div class="kpi-value">{{ '%.4f' | format(r.rate) }}</div>
-            <div class="kpi-meta">{{ r.name }} · {{ r.date }}</div>
+        <div class="fx-card">
+            <div class="fx-head">
+                <div>
+                    <div class="fx-code">{{ r.code }} → PLN</div>
+                    <div class="fx-rate">{{ '%.4f' | format(r.rate) }}</div>
+                </div>
+                {% if r.delta_pct is not none %}
+                    {% if r.delta_pct > 0 %}
+                        <span class="fx-delta up">▲ {{ '%+.2f' | format(r.delta_pct) }}%</span>
+                    {% elif r.delta_pct < 0 %}
+                        <span class="fx-delta down">▼ {{ '%+.2f' | format(r.delta_pct) }}%</span>
+                    {% else %}
+                        <span class="fx-delta flat">— 0%</span>
+                    {% endif %}
+                {% endif %}
+            </div>
+            <canvas class="fx-spark" data-spark='{{ r.history | tojson }}' data-color="{{ '#0ad48b' if (r.delta_pct or 0) >= 0 else '#ff5e6d' }}"></canvas>
+            <div class="fx-meta">{{ r.name }} · {{ r.date }}</div>
         </div>
         {% endfor %}
+
         {% if gold %}
-        <div class="kpi" data-accent="2">
-            <div class="kpi-label">Złoto (1g)</div>
-            <div class="kpi-value">{{ '%.2f' | format(gold.price) }} zł</div>
-            <div class="kpi-meta">NBP · {{ gold.date }}</div>
+        <div class="fx-card">
+            <div class="fx-head">
+                <div>
+                    <div class="fx-code">Złoto (1 g)</div>
+                    <div class="fx-rate">{{ '%.2f' | format(gold.price) }} zł</div>
+                </div>
+                {% if gold.delta_pct is not none %}
+                    {% if gold.delta_pct > 0 %}
+                        <span class="fx-delta up">▲ {{ '%+.2f' | format(gold.delta_pct) }}%</span>
+                    {% elif gold.delta_pct < 0 %}
+                        <span class="fx-delta down">▼ {{ '%+.2f' | format(gold.delta_pct) }}%</span>
+                    {% else %}
+                        <span class="fx-delta flat">— 0%</span>
+                    {% endif %}
+                {% endif %}
+            </div>
+            <canvas class="fx-spark" data-spark='{{ gold.history | tojson }}' data-color="{{ '#0ad48b' if (gold.delta_pct or 0) >= 0 else '#ff5e6d' }}"></canvas>
+            <div class="fx-meta">NBP fixing · {{ gold.date }}</div>
         </div>
         {% endif %}
     </div>
 
     <div class="card" style="margin-top: 22px;">
         <h3>Kalkulator zdolności na mieszkanie</h3>
-        <p class="muted">Wpisz miesięczne wynagrodzenie netto i zobacz, ile metrów kwadratowych możesz kupić w wybranym mieście (cena z dashboardu, 100% wynagrodzenia).</p>
+        <p class="muted">Wpisz miesięczne wynagrodzenie netto i cenę m², zobacz ile metrów kupisz oraz ile lat pracy potrzeba na 50 m².</p>
         <div class="row" style="gap: 14px; margin-top: 14px; flex-wrap: wrap;">
             <div class="form-group" style="margin: 0;">
                 <label>Twoje wynagrodzenie netto (zł)</label>
@@ -56,6 +103,10 @@
 {% block scripts %}
 <script>
     document.addEventListener('DOMContentLoaded', () => {
+        // ---- Sparklines ----
+        if (window.renderFinanceSparklines) window.renderFinanceSparklines();
+
+        // ---- Calc ----
         const wage = document.getElementById('calc-wage');
         const price = document.getElementById('calc-price');
         const pct = document.getElementById('calc-pct');

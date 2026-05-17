@@ -41,22 +41,41 @@ def _cached(key: str, fn):
 # ---------------------------------------------------------------------------
 
 def nbp_rates(currencies: tuple[str, ...] = ("USD", "EUR", "GBP", "CHF")) -> list[dict]:
-    """Return latest mid rates for the given currencies. Empty list on failure."""
+    """Latest mid rates + previous-day delta + 30-day mini-history per currency.
+
+    Returns [{code, name, rate, date, prev_rate, delta_pct, history}] where
+    `history` is [{date, rate}] for the last ~30 business days — enough for
+    a sparkline chart in /finance.
+    """
 
     def fetch():
         results = []
         for code in currencies:
             try:
-                url = f"{_NBP_BASE}/exchangerates/rates/A/{code}/?format=json"
+                # /last/30 — newest at the end
+                url = f"{_NBP_BASE}/exchangerates/rates/A/{code}/last/30/?format=json"
                 r = requests.get(url, timeout=_HTTP_TIMEOUT)
                 r.raise_for_status()
                 payload = r.json()
-                rate = payload["rates"][-1]
+                series = payload.get("rates") or []
+                if not series:
+                    continue
+                latest = series[-1]
+                prev = series[-2] if len(series) >= 2 else None
+                delta_pct = None
+                if prev and prev["mid"]:
+                    delta_pct = ((latest["mid"] - prev["mid"]) / prev["mid"]) * 100
                 results.append({
                     "code": code,
-                    "rate": rate["mid"],
-                    "date": rate["effectiveDate"],
                     "name": payload.get("currency"),
+                    "rate": latest["mid"],
+                    "date": latest["effectiveDate"],
+                    "prev_rate": prev["mid"] if prev else None,
+                    "delta_pct": round(delta_pct, 2) if delta_pct is not None else None,
+                    "history": [
+                        {"date": p["effectiveDate"], "rate": p["mid"]}
+                        for p in series
+                    ],
                 })
             except Exception as exc:  # pragma: no cover
                 log.warning("NBP rate fetch failed for %s: %s", code, exc)
@@ -82,16 +101,28 @@ def nbp_reference_rate() -> Optional[float]:
 
 
 def nbp_gold_price() -> Optional[dict]:
-    """Latest gold fixing price in PLN/g."""
+    """Latest gold fixing price (PLN/g) + previous-day delta + 30-day history."""
 
     def fetch():
         try:
-            url = f"{_NBP_BASE}/cenyzlota?format=json"
+            url = f"{_NBP_BASE}/cenyzlota/last/30/?format=json"
             r = requests.get(url, timeout=_HTTP_TIMEOUT)
             r.raise_for_status()
-            data = r.json()
-            if data:
-                return {"price": data[-1]["cena"], "date": data[-1]["data"]}
+            series = r.json() or []
+            if not series:
+                return None
+            latest = series[-1]
+            prev = series[-2] if len(series) >= 2 else None
+            delta_pct = None
+            if prev and prev.get("cena"):
+                delta_pct = ((latest["cena"] - prev["cena"]) / prev["cena"]) * 100
+            return {
+                "price": latest["cena"],
+                "date": latest["data"],
+                "prev_price": prev["cena"] if prev else None,
+                "delta_pct": round(delta_pct, 2) if delta_pct is not None else None,
+                "history": [{"date": p["data"], "rate": p["cena"]} for p in series],
+            }
         except Exception as exc:  # pragma: no cover
             log.warning("NBP gold fetch failed: %s", exc)
         return None
